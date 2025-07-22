@@ -1,0 +1,463 @@
+#!/usr/bin/env python3
+"""
+Enhanced AI Analysis Module
+Improved incident analysis with better prompting and parsing
+"""
+
+import requests
+import json
+import re
+import os
+import sys
+
+# Add the app directory to Python path for imports
+app_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, app_dir)
+
+from app.config.config import OPENAI_API_KEY
+
+
+# Placeholder for AI analysis logic
+class AIAnalyzer:
+    def __init__(self):
+        # Load configuration from environment
+        self.openai_api_key = OPENAI_API_KEY
+        
+        # Validate API key
+        if not self.openai_api_key:
+            raise ValueError("OPENAI_API_KEY not found in environment variables")
+    
+    def analyze_incident(self, transcribed_text):
+        """
+        Analyze transcribed text and extract incident information
+        
+        Args:
+            transcribed_text (str): The transcribed text from audio
+            
+        Returns:
+            dict: Structured incident information or None if failed
+        """
+        try:
+            # Get structured analysis
+            structured_data = self._get_structured_analysis(transcribed_text)
+            
+            if structured_data:
+                return structured_data
+            else:
+                print("❌ Structured analysis failed")
+                return None
+                
+        except Exception as e:
+            print(f"❌ Error during AI analysis: {str(e)}")
+            return None
+    
+    def _get_structured_analysis(self, transcribed_text):
+        """
+        Get structured analysis using improved prompting
+        """
+        try:
+            # Enhanced prompt with better instructions
+            prompt = f"""
+You are an expert incident analyst. Analyze the following transcript and extract incident information. 
+
+IMPORTANT: Generate a descriptive title based on the content, don't just say "Incident Report".
+
+Please provide your analysis in this EXACT format (copy the structure exactly):
+
+===ANALYSIS START===
+INCIDENT_TITLE: [Generate a specific, descriptive title based on what happened]
+WHO: [People involved, their roles, departments mentioned]
+WHAT: [Detailed description of what happened, sequence of events]
+WHERE: [Location, department, facility, or area where incident occurred]
+IMMEDIATE_ACTION: [What was done immediately after the incident]
+QUALITY_CONCERNS: [Quality issues, potential impacts on products/services]
+QUALITY_CONTROLS: [Quality control measures that failed or were bypassed]
+RCA_TOOL: [Recommend appropriate root cause analysis method]
+EXPECTED_INTERIM_ACTION: [Actions needed to prevent immediate recurrence]
+CAPA: [Corrective and Preventive Actions needed]
+===ANALYSIS END===
+
+TRANSCRIPT TO ANALYZE:
+"{transcribed_text}"
+
+INSTRUCTIONS:
+- Be specific and detailed in your analysis
+- If information is not available, write "Not specified in transcript"
+- Generate a meaningful title that describes the actual incident
+- Focus on extracting facts from the transcript
+- Provide actionable recommendations for RCA_TOOL, EXPECTED_INTERIM_ACTION, and CAPA
+"""
+            
+            # Use OpenAI API for analysis
+            headers = {
+                'Authorization': f'Bearer {self.openai_api_key}',
+                'Content-Type': 'application/json'
+            }
+            
+            # Use OpenAI GPT-4o model
+            data = {
+                'model': 'gpt-4o',
+                'messages': [
+                    {
+                        'role': 'user',
+                        'content': prompt
+                    }
+                ],
+                'max_tokens': 3000,
+                'temperature': 0.2  # Lower temperature for more consistent output
+            }
+            
+            response = requests.post(
+                'https://api.openai.com/v1/chat/completions',
+                headers=headers,
+                json=data,
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                analysis_text = result['choices'][0]['message']['content'].strip()
+                
+                # Parse the structured response
+                incident_data = self._parse_enhanced_response(analysis_text)
+                
+                if incident_data and self._validate_analysis(incident_data):
+                    print(f"✅ Analysis successful with OpenAI GPT-4o model")
+                    return incident_data
+                else:
+                    print(f"⚠️ Analysis parsing failed with OpenAI GPT-4o model")
+                    return None
+            else:
+                print(f"❌ API Error with OpenAI GPT-4o: {response.status_code}")
+                if response.status_code == 429:
+                    print("⏳ Rate limit hit, try again later...")
+                return None
+                
+        except Exception as e:
+            print(f"❌ Error in structured analysis: {str(e)}")
+            return None
+    
+    def _parse_enhanced_response(self, analysis_text):
+        """
+        Parse the enhanced AI response with better error handling
+        """
+        try:
+            incident_data = {
+                'title': '',
+                'who': '',
+                'what': '',
+                'where': '',
+                'immediate_action': '',
+                'quality_concerns': '',
+                'quality_controls': '',
+                'rca_tool': '',
+                'expected_interim_action': '',
+                'capa': ''
+            }
+            
+            # Extract content between markers if present
+            start_marker = "===ANALYSIS START==="
+            end_marker = "===ANALYSIS END==="
+            
+            if start_marker in analysis_text and end_marker in analysis_text:
+                content = analysis_text.split(start_marker)[1].split(end_marker)[0]
+            else:
+                content = analysis_text
+            
+            # Parse using regex for more robust extraction
+            patterns = {
+                'title': r'INCIDENT_TITLE:\s*(.+?)(?=\n\w+:|$)',
+                'who': r'WHO:\s*(.+?)(?=\n\w+:|$)',
+                'what': r'WHAT:\s*(.+?)(?=\n\w+:|$)',
+                'where': r'WHERE:\s*(.+?)(?=\n\w+:|$)',
+                'immediate_action': r'IMMEDIATE_ACTION:\s*(.+?)(?=\n\w+:|$)',
+                'quality_concerns': r'QUALITY_CONCERNS:\s*(.+?)(?=\n\w+:|$)',
+                'quality_controls': r'QUALITY_CONTROLS:\s*(.+?)(?=\n\w+:|$)',
+                'rca_tool': r'RCA_TOOL:\s*(.+?)(?=\n\w+:|$)',
+                'expected_interim_action': r'EXPECTED_INTERIM_ACTION:\s*(.+?)(?=\n\w+:|$)',
+                'capa': r'CAPA:\s*(.+?)(?=\n\w+:|$)'
+            }
+            
+            for key, pattern in patterns.items():
+                match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+                if match:
+                    value = match.group(1).strip()
+                    # Clean up the value
+                    value = re.sub(r'\n\s*', ' ', value)  # Replace newlines with spaces
+                    value = re.sub(r'\s+', ' ', value)    # Normalize whitespace
+                    incident_data[key] = value
+            
+            return incident_data
+            
+        except Exception as e:
+            print(f"❌ Error parsing enhanced response: {str(e)}")
+            return None
+    
+    def _validate_analysis(self, incident_data):
+        """
+        Validate that the analysis contains meaningful information
+        """
+        if not incident_data:
+            return False
+        
+        # Check if at least title and what are filled with meaningful content
+        title = incident_data.get('title', '').strip()
+        what = incident_data.get('what', '').strip()
+        
+        if not title or title == 'N/A' or len(title) < 5:
+            return False
+        
+        if not what or what == 'N/A' or len(what) < 10:
+            return False
+        
+        return True
+    
+    def get_summary_analysis(self, transcribed_text):
+        """
+        Get a quick summary analysis of the incident
+        """
+        try:
+            prompt = f"""
+Provide a brief 2-3 sentence summary of this incident:
+
+"{transcribed_text}"
+
+Focus on: what happened, who was involved, and the key concern.
+"""
+            
+            headers = {
+                'Authorization': f'Bearer {self.openai_api_key}',
+                'Content-Type': 'application/json'
+            }
+            
+            data = {
+                'model': 'gpt-4o',
+                'messages': [
+                    {
+                        'role': 'user',
+                        'content': prompt
+                    }
+                ],
+                'max_tokens': 300,
+                'temperature': 0.3
+            }
+            
+            response = requests.post(
+                'https://api.openai.com/v1/chat/completions',
+                headers=headers,
+                json=data,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return result['choices'][0]['message']['content'].strip()
+            else:
+                return None
+                
+        except Exception as e:
+            print(f"❌ Error getting summary: {str(e)}")
+            return None
+
+    def analyze_document_for_extraction(self, text_content):
+        """
+        Analyze extracted text to find specific document types and references.
+        
+        Args:
+            text_content (str): The text extracted from a document.
+            
+        Returns:
+            dict: Structured information about the document, or None if failed.
+        """
+        try:
+            prompt = f"""
+You are an expert document analyst for a quality assurance department. Analyze the following text and identify any references to the following categories.
+
+Please provide your analysis in this EXACT format (copy the structure exactly):
+
+===ANALYSIS START===
+AI_SUGGESTED_TITLE: [Generate a concise and descriptive title for the document]
+BATCH_RECORDS: [List any batch or lot numbers, production dates, or manufacturing records found]
+SOPS: [List any Standard Operating Procedures (SOPs) mentioned by number or title]
+FORMS: [List any specific form numbers or titles mentioned]
+INTERVIEWS: [Summarize any interview transcripts or statements from personnel]
+LOGBOOKS: [List any references to logbooks, including equipment, maintenance, or daily logs]
+EMAIL_REFERENCES: [List any email subjects, senders, or dates mentioned]
+CERTIFICATES: [List any certificates of analysis, compliance, or other certifications]
+===ANALYSIS END===
+
+TEXT TO ANALYZE:
+"{text_content}"
+
+INSTRUCTIONS:
+- For each category, list the specific references found in the text.
+- If no information is found for a category, write "Not found in document".
+- The title should be based on the overall content of the document.
+"""
+            
+            headers = {
+                'Authorization': f'Bearer {self.openai_api_key}',
+                'Content-Type': 'application/json'
+            }
+            
+            data = {
+                'model': 'gpt-4o',
+                'messages': [
+                    {
+                        'role': 'user',
+                        'content': prompt
+                    }
+                ],
+                'max_tokens': 2000,
+                'temperature': 0.1
+            }
+            
+            response = requests.post(
+                'https://api.openai.com/v1/chat/completions',
+                headers=headers,
+                json=data,
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                analysis_text = result['choices'][0]['message']['content'].strip()
+                
+                # Parse the structured response
+                document_data = self._parse_extraction_response(analysis_text)
+                
+                if document_data:
+                    print(f"✅ Document analysis successful with OpenAI GPT-4o model")
+                    return document_data
+                else:
+                    print(f"⚠️ Document analysis parsing failed with OpenAI GPT-4o model")
+                    return None
+            else:
+                print(f"❌ API Error with OpenAI GPT-4o: {response.status_code}")
+                return None
+                
+        except Exception as e:
+            print(f"❌ Error in document analysis: {str(e)}")
+            return None
+
+    def _parse_extraction_response(self, analysis_text):
+        """
+        Parse the AI response for document extraction and format the output block.
+        """
+        try:
+            # Initialize default document data
+            document_data = {
+                'AI suggested Title': 'Placeholder Text Document Analysis',
+                'Batch records': 'Not found in document',
+                "SOP's": 'Not found in document',
+                'Forms': 'Not found in document',
+                'Interviews': 'Not found in document',
+                'Logbooks': 'Not found in document',
+                'Email references': 'Not found in document',
+                'Certificates': 'Not found in document'
+            }
+
+            # Ensure analysis_text is a string and contains markers
+            if not isinstance(analysis_text, str):
+                raise ValueError("Invalid analysis_text format. Expected a string.")
+
+            # Extract content between markers if present
+            start_marker = "===ANALYSIS START==="
+            end_marker = "===ANALYSIS END==="
+            
+            if start_marker in analysis_text and end_marker in analysis_text:
+                content = analysis_text.split(start_marker)[1].split(end_marker)[0]
+            else:
+                content = analysis_text
+
+            # Parse using regex for more robust extraction
+            patterns = {
+                'AI suggested Title': r'AI_SUGGESTED_TITLE:\s*(.+)',
+                'Batch records': r'BATCH_RECORDS:\s*(.+)',
+                "SOP's": r'SOPS:\s*(.+)',
+                'Forms': r'FORMS:\s*(.+)',
+                'Interviews': r'INTERVIEWS:\s*(.+)',
+                'Logbooks': r'LOGBOOKS:\s*(.+)',
+                'Email references': r'EMAIL_REFERENCES:\s*(.+)',
+                'Certificates': r'CERTIFICATES:\s*(.+)'
+            }
+            
+            for key, pattern in patterns.items():
+                match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+                if match:
+                    value = match.group(1).strip()
+                    # Only add to output if value is not empty or not a negative phrase
+                    if value and value.lower() != "not found in document":
+                        document_data[key] = value
+
+            # Return the parsed dictionary for downstream processing
+            return document_data
+        except Exception as e:
+            print(f"❌ Error parsing extraction response: {str(e)}")
+            return None
+
+    @staticmethod
+    def analyze_prompt(prompt):
+        """
+        Generic method to analyze any prompt using OpenAI
+
+        Args:
+            prompt (str): The prompt to analyze
+
+        Returns:
+            dict: Analysis results
+        """
+        try:
+            analyzer = AIAnalyzer()
+
+            headers = {
+                "Authorization": f"Bearer {analyzer.openai_api_key}",
+                "Content-Type": "application/json"
+            }
+
+            data = {
+                "model": "gpt-4o",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are an expert analyst. Analyze the provided content and return structured information."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                "max_tokens": 1000,
+                "temperature": 0.3
+            }
+
+            response = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers=headers,
+                json=data,
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                analysis_text = result['choices'][0]['message']['content']
+
+                # Return structured response
+                return {
+                    "analysis": analysis_text,
+                    "status": "success"
+                }
+            else:
+                print(f"❌ API Error with OpenAI GPT-4o: {response.status_code}")
+                return {
+                    "analysis": "Analysis failed due to API error",
+                    "status": "error",
+                    "error_code": response.status_code
+                }
+
+        except Exception as e:
+            print(f"❌ Error in analyze_prompt: {str(e)}")
+            return {
+                "analysis": f"Analysis failed: {str(e)}",
+                "status": "error"
+            }

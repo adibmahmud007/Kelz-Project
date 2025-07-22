@@ -396,6 +396,140 @@ INSTRUCTIONS:
             print(f"❌ Error parsing extraction response: {str(e)}")
             return None
 
+    def analyze_capa(self, transcript):
+        """
+        Analyze transcript for CAPA information
+        """
+        try:
+            prompt = f"""
+You are an expert quality analyst. Analyze the following transcript and extract CAPA (Corrective and Preventive Action) information.
+
+Please provide your analysis in this EXACT format (copy the structure exactly):
+
+===CAPA ANALYSIS START===
+CAPA_TITLE: [Generate a brief, descriptive heading of the CAPA based on the transcript]
+CAPA_DESCRIPTION: [Generate detailed list of actions from transcript]
+CORRECTIVE_ACTIONS: [List specific corrective actions to be taken]
+DOCUMENT_REFERENCES: [Identify specific document references to be updated]
+DOCUMENT_SECTIONS: [Confirm document sections to be amended]
+DOCUMENT_TYPE: [Confirm document type - SOP, Policy, Manual, Form, etc.]
+===CAPA ANALYSIS END===
+
+TRANSCRIPT TO ANALYZE:
+"{transcript}"
+
+INSTRUCTIONS:
+- Generate a brief but descriptive CAPA title
+- Extract detailed corrective actions from the transcript
+- Identify any documents mentioned that need updating
+- Specify sections within documents that require changes
+- Determine the type of documents referenced
+- If information is not available, write "Not specified in transcript"
+"""
+            
+            headers = {
+                'Authorization': f'Bearer {self.openai_api_key}',
+                'Content-Type': 'application/json'
+            }
+            
+            data = {
+                'model': 'gpt-4o',
+                'messages': [
+                    {
+                        'role': 'user',
+                        'content': prompt
+                    }
+                ],
+                'max_tokens': 2000,
+                'temperature': 0.2
+            }
+            
+            response = requests.post(
+                'https://api.openai.com/v1/chat/completions',
+                headers=headers,
+                json=data,
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                analysis_text = result['choices'][0]['message']['content'].strip()
+                
+                # Parse the structured response
+                capa_data = self._parse_capa_response(analysis_text)
+                
+                if capa_data:
+                    print(f"✅ CAPA analysis successful with OpenAI GPT-4o model")
+                    return capa_data
+                else:
+                    print(f"⚠️ CAPA analysis parsing failed with OpenAI GPT-4o model")
+                    return None
+            else:
+                print(f"❌ API Error with OpenAI GPT-4o: {response.status_code}")
+                return None
+                
+        except Exception as e:
+            print(f"❌ Error in CAPA analysis: {str(e)}")
+            return None
+
+    def _parse_capa_response(self, analysis_text):
+        """
+        Parse the CAPA AI response
+        """
+        try:
+            capa_data = {
+                'title': '',
+                'description': '',
+                'actions': [],
+                'document_refs': [],
+                'sections': [],
+                'doc_type': ''
+            }
+            
+            # Extract content between markers if present
+            start_marker = "===CAPA ANALYSIS START==="
+            end_marker = "===CAPA ANALYSIS END==="
+            
+            if start_marker in analysis_text and end_marker in analysis_text:
+                content = analysis_text.split(start_marker)[1].split(end_marker)[0]
+            else:
+                content = analysis_text
+            
+            # Parse using regex
+            patterns = {
+                'title': r'CAPA_TITLE:\s*(.+?)(?=\n\w+:|$)',
+                'description': r'CAPA_DESCRIPTION:\s*(.+?)(?=\n\w+:|$)',
+                'actions': r'CORRECTIVE_ACTIONS:\s*(.+?)(?=\n\w+:|$)',
+                'document_refs': r'DOCUMENT_REFERENCES:\s*(.+?)(?=\n\w+:|$)',
+                'sections': r'DOCUMENT_SECTIONS:\s*(.+?)(?=\n\w+:|$)',
+                'doc_type': r'DOCUMENT_TYPE:\s*(.+?)(?=\n\w+:|$)'
+            }
+            
+            for key, pattern in patterns.items():
+                match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+                if match:
+                    value = match.group(1).strip()
+                    # Clean up the value
+                    value = re.sub(r'\n\s*', ' ', value)  # Replace newlines with spaces
+                    value = re.sub(r'\s+', ' ', value)    # Normalize whitespace
+                    
+                    # For lists, split by common delimiters
+                    if key in ['actions', 'document_refs', 'sections'] and value:
+                        if ',' in value:
+                            capa_data[key] = [item.strip() for item in value.split(',')]
+                        elif '\n' in value:
+                            capa_data[key] = [item.strip() for item in value.split('\n') if item.strip()]
+                        else:
+                            capa_data[key] = [value]
+                    else:
+                        capa_data[key] = value
+            
+            return capa_data
+            
+        except Exception as e:
+            print(f"❌ Error parsing CAPA response: {str(e)}")
+            return None
+
     @staticmethod
     def analyze_prompt(prompt):
         """

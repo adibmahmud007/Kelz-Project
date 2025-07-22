@@ -71,6 +71,41 @@ def perform_quality_review_from_audio(audio: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/capa/details/audio/")
+def process_capa_from_audio(audio: UploadFile = File(...)):
+    """
+    Process CAPA from audio file
+    """
+    try:
+        # Save and transcribe audio
+        temp_path = f"temp_{audio.filename}"
+        with open(temp_path, "wb") as f:
+            f.write(audio.file.read())
+        
+        transcriber = VoiceTranscriber()
+        transcript = transcriber.transcribe_audio(temp_path)
+        os.remove(temp_path)
+        
+        if not transcript:
+            raise HTTPException(status_code=400, detail="Failed to transcribe audio.")
+        
+        # Analyze for CAPA
+        analyzer = AIAnalyzer()
+        capa_data = analyzer.analyze_capa(transcript)
+        
+        return {
+            "voice_recording": audio.filename,
+            "auto_transcription": transcript,
+            "capa_title": capa_data.get("title", ""),
+            "capa_description": capa_data.get("description", ""),
+            "corrective_actions": capa_data.get("actions", []),
+            "document_references": capa_data.get("document_refs", []),
+            "document_sections": capa_data.get("sections", []),
+            "document_type": capa_data.get("doc_type", "")
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/")
 def root():
     return {"message": "Welcome to the Document Analysis and Transcription API!"}

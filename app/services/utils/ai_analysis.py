@@ -530,6 +530,135 @@ INSTRUCTIONS:
             print(f"❌ Error parsing CAPA response: {str(e)}")
             return None
 
+    def analyze_with_prompt(self, custom_prompt: str) -> str:
+        """
+        Generic method to analyze content with a custom prompt.
+        
+        Args:
+            custom_prompt: Custom prompt for AI analysis
+            
+        Returns:
+            AI-generated response as string
+        """
+        try:
+            headers = {
+                'Authorization': f'Bearer {self.openai_api_key}',
+                'Content-Type': 'application/json'
+            }
+            
+            data = {
+                'model': 'gpt-4o',
+                'messages': [
+                    {
+                        'role': 'system',
+                        'content': 'You are an expert analyst. Analyze the provided content and return structured information.'
+                    },
+                    {
+                        'role': 'user',
+                        'content': custom_prompt
+                    }
+                ],
+                'max_tokens': 2000,
+                'temperature': 0.7
+            }
+            
+            response = requests.post(
+                'https://api.openai.com/v1/chat/completions',
+                headers=headers,
+                json=data,
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return result['choices'][0]['message']['content'].strip()
+            else:
+                raise Exception(f"API Error: {response.status_code}")
+                
+        except Exception as e:
+            raise Exception(f"AI analysis failed: {str(e)}")
+
+    def analyze_investigation_context(self, context: str) -> dict:
+        """
+        Specialized method for investigation context analysis.
+        
+        Args:
+            context: Investigation context string
+            
+        Returns:
+            Dictionary with investigation analysis
+        """
+        investigation_prompt = f"""
+        Analyze the following deviation investigation context and provide comprehensive insights:
+        
+        {context}
+        
+        Please provide analysis covering:
+        1. Background summary
+        2. Timeline and affected systems
+        3. Root cause analysis
+        4. Impact assessment
+        5. Corrective and preventive action recommendations
+        6. Risk evaluation and compliance implications
+        
+        Format the response as a structured JSON analysis suitable for pharmaceutical deviation investigations.
+        
+        Use this structure:
+        {{
+            "background_summary": "Investigation analysis based on provided context and deviation data",
+            "discussion": {{
+                "timeline": "Event timeline constructed from available information",
+                "affected_systems": ["Systems identified from context analysis"],
+                "initial_findings": "Preliminary findings based on incident description and background"
+            }},
+            "root_cause_analysis": {{
+                "primary_cause": "Root cause identified through systematic analysis",
+                "contributing_factors": ["Contributing factors derived from context"],
+                "methodology": "Structured root cause analysis methodology applied",
+                "evidence": ["Evidence gathered from provided documentation"]
+            }},
+            "final_assessment": {{
+                "impact_analysis": "Comprehensive impact assessment based on triage data",
+                "risk_evaluation": "Risk evaluation considering all factors",
+                "compliance_implications": "Regulatory and compliance considerations",
+                "recurrence_probability": "Likelihood assessment of similar incidents"
+            }},
+            "capa_recommendations": {{
+                "immediate_actions": ["Immediate corrective actions recommended"],
+                "long_term_actions": ["Long-term preventive measures suggested"],
+                "responsible_parties": ["Recommended responsible parties"],
+                "timeline": "Suggested implementation timeline"
+            }},
+            "ai_generated_insights": {{
+                "pattern_analysis": "Analysis of patterns and trends",
+                "risk_mitigation": "Additional risk mitigation strategies",
+                "process_improvements": ["Process improvement recommendations"],
+                "monitoring_recommendations": ["Ongoing monitoring suggestions"]
+            }}
+        }}
+        """
+        
+        try:
+            response = self.analyze_with_prompt(investigation_prompt)
+            
+            # Try to parse as JSON first
+            try:
+                return json.loads(response)
+            except json.JSONDecodeError:
+                # If response isn't valid JSON, return structured dict
+                return {
+                    "analysis": response,
+                    "status": "text_response",
+                    "requires_manual_parsing": True
+                }
+                
+        except Exception as e:
+            print(f"❌ Error in investigation analysis: {str(e)}")
+            return {
+                "analysis": f"Investigation analysis failed: {str(e)}",
+                "status": "error"
+            }
+
     @staticmethod
     def analyze_prompt(prompt):
         """

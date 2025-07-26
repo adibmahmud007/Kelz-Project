@@ -8,6 +8,14 @@ import tempfile
 import shutil
 from typing import Dict, Any
 
+# Initialize FastAPI app
+app = FastAPI(
+    title="AI Analysis API",
+    description="API for AI-powered analysis of documents, audio, and text files",
+    version="1.0.0"
+)
+
+# Create main router
 router = APIRouter()
 
 # Initialize services
@@ -15,7 +23,17 @@ ai_analyzer = AIAnalyzer()
 voice_transcriber = VoiceTranscriber()
 document_ocr = DocumentOCR()
 
-# --- DEFAULT TAG ---
+# Import and include routers
+from app.services.deviation.incident import incident_router
+from app.services.deviation.file_extract.file_extract_router import router as file_extract_router
+
+# Register incident routes
+incident_router.register_incident_routes(router)
+
+# Include file extract router under deviation tag
+router.include_router(file_extract_router, prefix="/deviation", tags=["deviation"])
+
+# --- DEFAULT TAG ENDPOINTS ---
 @router.post("/ai-analysis/", tags=["default"])
 async def ai_analysis(file: UploadFile = File(...)):
     """AI analysis of uploaded text file."""
@@ -74,6 +92,18 @@ async def text_extraction(file: UploadFile = File(...)):
         
         # Extract text using OCR only
         extracted_text = document_ocr.extract_text(temp_file_path)
+        text_content = document_ocr.extract_text(temp_file_path)
+        if not text_content or not text_content.strip():
+            # Handle error
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "status": "warning",
+                    "filename": file.filename,
+                    "extracted_text": "",
+                    "message": "No text could be extracted from the document"
+                }
+            )
         
         if extracted_text:
             return JSONResponse(
@@ -166,119 +196,13 @@ async def transcription_audio(audio: UploadFile = File(...)):
         if temp_file_path and os.path.exists(temp_file_path):
             os.unlink(temp_file_path)
 
-# --- DEVIATION TAG ---
-@router.post("/file-analysis/", tags=["deviation"])
-async def file_analysis(file: UploadFile = File(...)):
-    """Analyze uploaded file for deviation incidents."""
-    temp_file_path = None
-    try:
-        # Handle different file types
-        if file.content_type.startswith('text/'):
-            # Text file
-            content = await file.read()
-            text_content = content.decode('utf-8')
-            
-        elif file.content_type.startswith('audio/'):
-            # Audio file - transcribe first
-            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as temp_file:
-                temp_file_path = temp_file.name
-                content = await file.read()
-                temp_file.write(content)
-            
-            text_content = voice_transcriber.transcribe_audio(temp_file_path)
-            if not text_content:
-                raise HTTPException(status_code=500, detail="Failed to transcribe audio file")
-                
-        elif file.content_type in ['application/pdf'] or file.content_type.startswith('image/'):
-            # Document/Image file - extract text first
-            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as temp_file:
-                temp_file_path = temp_file.name
-                content = await file.read()
-                temp_file.write(content)
-            
-            text_content = document_ocr.extract_text(temp_file_path)
-            if not text_content:
-                raise HTTPException(status_code=500, detail="Failed to extract text from document")
-        else:
-            raise HTTPException(status_code=400, detail="Unsupported file type for deviation analysis")
-        
-        # Perform comprehensive analysis
-        incident_analysis = ai_analyzer.analyze_incident(text_content)
-        document_analysis = ai_analyzer.analyze_document_for_extraction(text_content)
-        summary = ai_analyzer.get_summary_analysis(text_content)
-        
-        return JSONResponse(
-            status_code=200,
-            content={
-                "status": "success",
-                "filename": file.filename,
-                "file_type": file.content_type,
-                "extracted_content": text_content[:500] + "..." if len(text_content) > 500 else text_content,
-                "incident_analysis": incident_analysis,
-                "document_analysis": document_analysis,
-                "summary": summary,
-                "message": "File analysis for deviation completed successfully"
-            }
-        )
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"File analysis error: {str(e)}")
-    finally:
-        if temp_file_path and os.path.exists(temp_file_path):
-            os.unlink(temp_file_path)
+# --- DEVIATION TAG ENDPOINTS ---
 
-@router.post("/incident/", tags=["deviation"])
-async def deviation_incident(file: UploadFile = File(...)):
-    """Process deviation incident from uploaded file."""
-    try:
-        # Read and process file content
-        content = await file.read()
-        text_content = content.decode('utf-8')
-        
-        # Analyze incident
-        incident_analysis = ai_analyzer.analyze_incident(text_content)
-        
-        if incident_analysis:
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "status": "success",
-                    "filename": file.filename,
-                    "incident_data": incident_analysis,
-                    "message": "Deviation incident analysis completed"
-                }
-            )
-        else:
-            raise HTTPException(status_code=500, detail="Incident analysis failed")
-            
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Incident processing error: {str(e)}")
+# Import and include the investigation_router endpoints
+from app.services.deviation.investigation.investigation_router import router as investigation_router
+router.include_router(investigation_router, prefix="/investigation/audio", tags=["deviation"])
 
-@router.post("/investigation/", tags=["deviation"])
-async def investigation(file: UploadFile = File(...)):
-    """Process deviation investigation from uploaded file."""
-    try:
-        # Read file content
-        content = await file.read()
-        text_content = content.decode('utf-8')
-        
-        # Perform investigation analysis
-        investigation_analysis = ai_analyzer.analyze_investigation_context(text_content)
-        
-        return JSONResponse(
-            status_code=200,
-            content={
-                "status": "success",
-                "filename": file.filename,
-                "investigation_data": investigation_analysis,
-                "message": "Deviation investigation analysis completed"
-            }
-        )
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Investigation analysis error: {str(e)}")
-
-@router.post("/quality-review/", tags=["deviation"])
+@router.post("/deviation/quality-review/", tags=["deviation"])
 async def quality_review(file: UploadFile = File(...)):
     """Perform quality review on uploaded file."""
     try:
@@ -308,7 +232,7 @@ async def quality_review(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Quality review error: {str(e)}")
 
-# --- CAPA TAG ---
+# --- CAPA TAG ENDPOINTS ---
 @router.post("/capa/details/", tags=["capa"])
 async def capa_details(file: UploadFile = File(...)):
     """Extract CAPA details from uploaded file."""
@@ -388,15 +312,10 @@ async def capa_documents(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"CAPA documents error: {str(e)}")
 
-# Initialize FastAPI app
-app = FastAPI(
-    title="AI Analysis API",
-    description="API for AI-powered analysis of documents, audio, and text files",
-    version="1.0.0"
-)
-
+# Include the main router in the app
 app.include_router(router)
 
+# Root endpoints
 @app.get("/")
 def read_root():
     return {
@@ -406,11 +325,20 @@ def read_root():
             "ai_analysis": "/ai-analysis/",
             "text_extraction": "/extract-text/",
             "transcription": "/transcription/audio/",
-            "deviation_analysis": "/file-analysis/",
-            "capa_processing": "/capa/details/"
+            "deviation_file_extract": "/deviation/file-extract",
+            "deviation_investigation": "/deviation/investigation/",
+            "deviation_quality_review": "/deviation/quality-review/",
+            "capa_details": "/capa/details/",
+            "capa_review": "/capa/review/",
+            "capa_documents": "/capa/documents/",
+            "incident_management": "/incident/"
         }
     }
 
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "message": "API is running normally"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

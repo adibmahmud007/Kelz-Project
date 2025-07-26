@@ -1,227 +1,302 @@
-#!/usr/bin/env python3
-"""
-File Conversion Workflow
-
-- file_extract will send any file to file_convert.py.
-- file_convert.py will check if the file is a PDF or an image.
-- If the file is neither a PDF nor an image, it will convert the file to PDF.
-- Image files will not be converted.
-"""
-
 import os
-import sys
-from typing import Optional
+import tempfile
 from pathlib import Path
+from docx import Document
+import pandas as pd
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.units import inch
+from reportlab.lib import colors
+import openpyxl
+from pptx import Presentation
+import csv
 
-# Add the app directory to Python path for imports
-app_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, app_dir)
-
-try:
-    from google.cloud import documentai
-    GOOGLE_DOCUMENTAI_AVAILABLE = True
-except ImportError:
-    GOOGLE_DOCUMENTAI_AVAILABLE = False
-    print("❌ Google Cloud Document AI not available. Please install google-cloud-documentai")
-
-class DocumentOCRProcessor:
-    """
-    Document OCR processor that uses Google Cloud Document AI exclusively
-    """
-    
+class FileConverter:
     def __init__(self):
-        """Initialize the Google Document AI processor"""
-        if not GOOGLE_DOCUMENTAI_AVAILABLE:
-            raise ImportError("Google Cloud Document AI is required but not available")
-        
-        # Load configuration from environment
-        self.project_id = os.getenv('PROJECT_ID')
-        self.location = os.getenv('LOCATION', 'eu')
-        self.processor_id = os.getenv('PROCESSOR_ID')
-        self.processor_version = os.getenv('PROCESSOR_VERSION', 'rc')
-        
-        if not all([self.project_id, self.processor_id]):
-            raise ValueError("PROJECT_ID and PROCESSOR_ID must be set in environment variables")
-        
-        # Initialize Document AI client
-        self.client = documentai.DocumentProcessorServiceClient()
-        
-        # Build processor name
-        self.processor_name = self.client.processor_path(
-            self.project_id, self.location, self.processor_id
-        )
-        
-        # Supported formats by Google Document AI
-        self.supported_formats = [
-            '.pdf', '.gif', '.tiff', '.jpg', '.jpeg', '.png', '.bmp', '.webp'
-        ]
-        
-        print(f"✅ Google Document AI initialized with processor: {self.processor_name}")
-    
-    def extract_text_from_document(self, file_path: str) -> Optional[str]:
-        """
-        Extract text from a document file using Google Document AI
-        
-        Args:
-            file_path (str): Path to the document file
-            
-        Returns:
-            Optional[str]: Extracted text or None if extraction failed
-        """
-        try:
-            if not os.path.exists(file_path):
-                print(f"❌ File not found: {file_path}")
-                return None
-            
-            file_extension = Path(file_path).suffix.lower()
-            
-            if file_extension not in self.supported_formats:
-                print(f"❌ Unsupported file format: {file_extension}")
-                print(f"Supported formats: {', '.join(self.supported_formats)}")
-                return None
-            
-            # Read the file
-            with open(file_path, 'rb') as file:
-                file_content = file.read()
-            
-            # Determine MIME type
-            mime_type = self._get_mime_type(file_extension)
-            
-            # Create the document object
-            raw_document = documentai.RawDocument(
-                content=file_content,
-                mime_type=mime_type
-            )
-            
-            # Create the request
-            request = documentai.ProcessRequest(
-                name=self.processor_name,
-                raw_document=raw_document
-            )
-            
-            # Process the document
-            print(f"🔄 Processing document with Google Document AI...")
-            result = self.client.process_document(request=request)
-            document = result.document
-            
-            # Extract text
-            extracted_text = document.text
-            
-            if extracted_text and extracted_text.strip():
-                print(f"✅ Text extracted successfully: {len(extracted_text)} characters")
-                return extracted_text
-            else:
-                print("⚠️  No text found in document")
-                return "No text detected in document"
-                
-        except Exception as e:
-            print(f"❌ Error extracting text from {file_path}: {str(e)}")
-            return None
-    
-    def _get_mime_type(self, file_extension: str) -> str:
-        """
-        Get MIME type based on file extension
-        
-        Args:
-            file_extension (str): File extension (with dot)
-            
-        Returns:
-            str: MIME type
-        """
-        mime_types = {
-            '.pdf': 'application/pdf',
-            '.gif': 'image/gif',
-            '.tiff': 'image/tiff',
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.png': 'image/png',
-            '.bmp': 'image/bmp',
-            '.webp': 'image/webp'
-        }
-        
-        return mime_types.get(file_extension.lower(), 'application/octet-stream')
-    
-    def get_supported_formats(self) -> dict:
-        """Get list of supported file formats"""
-        return {
-            "supported_formats": self.supported_formats,
-            "processor_info": {
-                "project_id": self.project_id,
-                "location": self.location,
-                "processor_id": self.processor_id,
-                "processor_version": self.processor_version
-            },
-            "google_documentai_available": GOOGLE_DOCUMENTAI_AVAILABLE
+        """Initialize file converter"""
+        self.supported_formats = {
+            '.docx': self.docx_to_pdf,
+            '.doc': self.doc_to_pdf,
+            '.xlsx': self.xlsx_to_pdf,
+            '.xls': self.xls_to_pdf,
+            '.csv': self.csv_to_pdf,
+            '.txt': self.txt_to_pdf,
+            '.pptx': self.pptx_to_pdf,
+            '.ppt': self.ppt_to_pdf
         }
     
-    def get_document_analysis(self, file_path: str) -> Optional[dict]:
-        """
-        Get detailed document analysis including entities and structure
+    def is_convertible(self, file_path):
+        """Check if file can be converted to PDF"""
+        extension = Path(file_path).suffix.lower()
+        return extension in self.supported_formats
+    
+    def convert_to_pdf(self, input_path, output_path=None):
+        """Convert file to PDF format"""
+        if not os.path.exists(input_path):
+            raise FileNotFoundError(f"Input file not found: {input_path}")
         
-        Args:
-            file_path (str): Path to the document file
-            
-        Returns:
-            Optional[dict]: Document analysis results
-        """
+        extension = Path(input_path).suffix.lower()
+        
+        if extension not in self.supported_formats:
+            raise ValueError(f"Unsupported file format: {extension}")
+        
+        # Generate output path if not provided
+        if output_path is None:
+            input_stem = Path(input_path).stem
+            output_path = os.path.join(tempfile.gettempdir(), f"{input_stem}_converted.pdf")
+        
+        print(f"FileConverter: Converting {extension} file to PDF...")
+        
+        # Call appropriate conversion function
+        converter_func = self.supported_formats[extension]
+        converter_func(input_path, output_path)
+        
+        print(f"FileConverter: Successfully converted to {os.path.basename(output_path)}")
+        return output_path
+    
+    def docx_to_pdf(self, input_path, output_path):
+        """Convert DOCX to PDF"""
         try:
-            if not os.path.exists(file_path):
-                print(f"❌ File not found: {file_path}")
-                return None
+            print(f"FileConverter: Processing DOCX file...")
+            doc = Document(input_path)
             
-            file_extension = Path(file_path).suffix.lower()
+            # Create PDF
+            pdf_doc = SimpleDocTemplate(output_path, pagesize=A4)
+            styles = getSampleStyleSheet()
+            story = []
             
-            if file_extension not in self.supported_formats:
-                print(f"❌ Unsupported file format: {file_extension}")
-                return None
+            # Process paragraphs
+            paragraph_count = 0
+            for paragraph in doc.paragraphs:
+                if paragraph.text.strip():
+                    p = Paragraph(paragraph.text, styles['Normal'])
+                    story.append(p)
+                    story.append(Spacer(1, 6))
+                    paragraph_count += 1
             
-            # Read the file
-            with open(file_path, 'rb') as file:
-                file_content = file.read()
+            pdf_doc.build(story)
+            print(f"FileConverter: Processed {paragraph_count} paragraphs from DOCX")
             
-            # Determine MIME type
-            mime_type = self._get_mime_type(file_extension)
-            
-            # Create the document object
-            raw_document = documentai.RawDocument(
-                content=file_content,
-                mime_type=mime_type
-            )
-            
-            # Create the request
-            request = documentai.ProcessRequest(
-                name=self.processor_name,
-                raw_document=raw_document
-            )
-            
-            # Process the document
-            print(f"🔄 Analyzing document with Google Document AI...")
-            result = self.client.process_document(request=request)
-            document = result.document
-            
-            # Extract comprehensive information
-            analysis = {
-                "text": document.text,
-                "pages": len(document.pages),
-                "entities": [],
-                "confidence": 0.0
-            }
-            
-            # Extract entities if available
-            for entity in document.entities:
-                analysis["entities"].append({
-                    "type": entity.type_,
-                    "mention_text": entity.mention_text,
-                    "confidence": entity.confidence
-                })
-            
-            # Calculate average confidence
-            if analysis["entities"]:
-                analysis["confidence"] = sum(e["confidence"] for e in analysis["entities"]) / len(analysis["entities"])
-            
-            print(f"✅ Document analysis completed: {len(analysis['entities'])} entities found")
-            return analysis
-                
         except Exception as e:
-            print(f"❌ Error analyzing document {file_path}: {str(e)}")
-            return None
+            raise Exception(f"Error converting DOCX to PDF: {e}")
+    
+    def doc_to_pdf(self, input_path, output_path):
+        """Convert DOC to PDF (requires python-docx2txt or similar)"""
+        try:
+            print(f"FileConverter: Processing DOC file...")
+            # For .doc files, we need additional libraries like python-docx2txt
+            # This is a simplified version - you might need to install additional packages
+            import docx2txt
+            text = docx2txt.process(input_path)
+            
+            # Create PDF from extracted text
+            pdf_doc = SimpleDocTemplate(output_path, pagesize=A4)
+            styles = getSampleStyleSheet()
+            story = []
+            
+            paragraphs = text.split('\n')
+            paragraph_count = 0
+            for para in paragraphs:
+                if para.strip():
+                    p = Paragraph(para, styles['Normal'])
+                    story.append(p)
+                    story.append(Spacer(1, 6))
+                    paragraph_count += 1
+            
+            pdf_doc.build(story)
+            print(f"FileConverter: Processed {paragraph_count} paragraphs from DOC")
+            
+        except ImportError:
+            raise Exception("python-docx2txt package required for .doc files. Install with: pip install docx2txt")
+        except Exception as e:
+            raise Exception(f"Error converting DOC to PDF: {e}")
+    
+    def xlsx_to_pdf(self, input_path, output_path):
+        """Convert XLSX to PDF"""
+        try:
+            print(f"FileConverter: Processing XLSX file...")
+            # Read Excel file
+            df = pd.read_excel(input_path, sheet_name=None)  # Read all sheets
+            
+            # Create PDF
+            pdf_doc = SimpleDocTemplate(output_path, pagesize=A4)
+            styles = getSampleStyleSheet()
+            story = []
+            
+            sheet_count = 0
+            total_rows = 0
+            
+            for sheet_name, sheet_df in df.items():
+                # Add sheet title
+                title = Paragraph(f"Sheet: {sheet_name}", styles['Heading1'])
+                story.append(title)
+                story.append(Spacer(1, 12))
+                
+                # Convert dataframe to table
+                data = [sheet_df.columns.tolist()] + sheet_df.values.tolist()
+                
+                # Create table with limited width to fit page
+                table = Table(data)
+                table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 8),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                    ('FONTSIZE', (0, 1), (-1, -1), 6),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black)
+                ]))
+                
+                story.append(table)
+                story.append(Spacer(1, 20))
+                
+                sheet_count += 1
+                total_rows += len(sheet_df)
+            
+            pdf_doc.build(story)
+            print(f"FileConverter: Processed {sheet_count} sheets with {total_rows} total rows from XLSX")
+            
+        except Exception as e:
+            raise Exception(f"Error converting XLSX to PDF: {e}")
+    
+    def xls_to_pdf(self, input_path, output_path):
+        """Convert XLS to PDF"""
+        print(f"FileConverter: Processing XLS file (using XLSX converter)...")
+        # Similar to xlsx_to_pdf but for older Excel format
+        self.xlsx_to_pdf(input_path, output_path)
+    
+    def csv_to_pdf(self, input_path, output_path):
+        """Convert CSV to PDF"""
+        try:
+            print(f"FileConverter: Processing CSV file...")
+            # Read CSV file
+            df = pd.read_csv(input_path)
+            
+            # Create PDF
+            pdf_doc = SimpleDocTemplate(output_path, pagesize=A4)
+            styles = getSampleStyleSheet()
+            story = []
+            
+            # Add title
+            title = Paragraph("CSV Data", styles['Heading1'])
+            story.append(title)
+            story.append(Spacer(1, 12))
+            
+            # Convert dataframe to table
+            data = [df.columns.tolist()] + df.values.tolist()
+            
+            table = Table(data)
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 8),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('FONTSIZE', (0, 1), (-1, -1), 6),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ]))
+            
+            story.append(table)
+            pdf_doc.build(story)
+            
+            print(f"FileConverter: Processed {len(df)} rows from CSV")
+            
+        except Exception as e:
+            raise Exception(f"Error converting CSV to PDF: {e}")
+    
+    def txt_to_pdf(self, input_path, output_path):
+        """Convert TXT to PDF"""
+        try:
+            print(f"FileConverter: Processing TXT file...")
+            with open(input_path, 'r', encoding='utf-8') as f:
+                text = f.read()
+            
+            # Create PDF
+            pdf_doc = SimpleDocTemplate(output_path, pagesize=A4)
+            styles = getSampleStyleSheet()
+            story = []
+            
+            paragraphs = text.split('\n')
+            paragraph_count = 0
+            for para in paragraphs:
+                if para.strip():
+                    p = Paragraph(para, styles['Normal'])
+                    story.append(p)
+                    paragraph_count += 1
+                story.append(Spacer(1, 6))
+            
+            pdf_doc.build(story)
+            print(f"FileConverter: Processed {paragraph_count} paragraphs from TXT")
+            
+        except Exception as e:
+            raise Exception(f"Error converting TXT to PDF: {e}")
+    
+    def pptx_to_pdf(self, input_path, output_path):
+        """Convert PPTX to PDF"""
+        try:
+            print(f"FileConverter: Processing PPTX file...")
+            prs = Presentation(input_path)
+            
+            # Create PDF
+            pdf_doc = SimpleDocTemplate(output_path, pagesize=A4)
+            styles = getSampleStyleSheet()
+            story = []
+            
+            slide_count = 0
+            text_count = 0
+            
+            for i, slide in enumerate(prs.slides):
+                # Add slide number
+                slide_title = Paragraph(f"Slide {i + 1}", styles['Heading1'])
+                story.append(slide_title)
+                story.append(Spacer(1, 12))
+                
+                # Extract text from shapes
+                for shape in slide.shapes:
+                    if hasattr(shape, "text") and shape.text:
+                        p = Paragraph(shape.text, styles['Normal'])
+                        story.append(p)
+                        story.append(Spacer(1, 6))
+                        text_count += 1
+                
+                story.append(Spacer(1, 20))
+                slide_count += 1
+            
+            pdf_doc.build(story)
+            print(f"FileConverter: Processed {slide_count} slides with {text_count} text elements from PPTX")
+            
+        except Exception as e:
+            raise Exception(f"Error converting PPTX to PDF: {e}")
+    
+    def ppt_to_pdf(self, input_path, output_path):
+        """Convert PPT to PDF (requires additional libraries)"""
+        try:
+            print(f"FileConverter: Processing PPT file...")
+            # For .ppt files, you might need win32com (Windows only) or other libraries
+            # This is a placeholder - actual implementation depends on your system
+            raise Exception("PPT conversion requires additional setup. Consider converting to PPTX first.")
+        except Exception as e:
+            raise Exception(f"Error converting PPT to PDF: {e}")
+
+
+def convert_file_to_pdf(file_path, output_path=None):
+    """Main function to convert file to PDF"""
+    converter = FileConverter()
+    
+    if not converter.is_convertible(file_path):
+        extension = Path(file_path).suffix.lower()
+        raise ValueError(f"File format {extension} is not supported for conversion")
+    
+    try:
+        pdf_path = converter.convert_to_pdf(file_path, output_path)
+        print(f"Successfully converted {file_path} to {pdf_path}")
+        return pdf_path
+    except Exception as e:
+        print(f"Conversion failed: {e}")
+        raise e

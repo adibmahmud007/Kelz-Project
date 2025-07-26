@@ -9,7 +9,7 @@ import tempfile
 from typing import Optional, Tuple
 from app.services.utils.transcription import VoiceTranscriber
 from app.services.utils.ai_analysis import AIAnalyzer
-from incident_schema import IncidentAnalysis, IncidentResponse, IncidentSummaryResponse, ErrorResponse
+from app.services.deviation.incident.incident_schema import IncidentSchema, IncidentAnalysis, IncidentResponse, IncidentSummaryResponse
 
 class IncidentManager:
     """
@@ -29,7 +29,7 @@ class IncidentManager:
             audio_file_path (str): Path to audio file
             
         Returns:
-            IncidentResponse: Complete incident processing response
+            IncidentSchema: Complete incident processing response
         """
         try:
             # Step 1: Transcribe audio
@@ -70,7 +70,7 @@ class IncidentManager:
             transcribed_text (str): Transcribed text to analyze
             
         Returns:
-            IncidentResponse: Complete incident processing response
+            IncidentSchema: Complete incident processing response
         """
         try:
             # Step 1: Get incident description and headline
@@ -226,7 +226,7 @@ Provide ONLY the headline, no additional text.
             transcribed_text (str): Transcribed text
             
         Returns:
-            IncidentSummaryResponse: Summary response
+            IncidentSchema: Summary response
         """
         try:
             summary = self.analyzer.get_summary_analysis(transcribed_text)
@@ -300,7 +300,7 @@ Provide ONLY the headline, no additional text.
             filename (str): Original filename
             
         Returns:
-            IncidentResponse: Processing response
+            IncidentSchema: Processing response
         """
         try:
             # Create temporary file
@@ -334,7 +334,7 @@ Provide ONLY the headline, no additional text.
         Display incident results in a formatted way
         
         Args:
-            response (IncidentResponse): Incident response to display
+            response (IncidentSchema): Incident response to display
         """
         print("\n" + "="*50)
         print("INCIDENT ANALYSIS RESULTS")

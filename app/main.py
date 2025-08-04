@@ -25,6 +25,7 @@ document_ocr = DocumentOCR()
 
 # Import and include routers
 from app.services.deviation.incident import incident_router
+<<<<<<< HEAD
 from app.services.deviation.file_extract import file_extract_router
 from app.services.deviation.quality_review import quality_review_router
 from app.services.deviation.investigation import investigation_router
@@ -42,6 +43,15 @@ app.include_router(investigation_router.router)
 # router.include_router(quality_review_router, prefix="/quality-review", tags=["deviation"])
 # # Include investigation router
 # router.include_router(investigation_router, prefix="/investigation/audio", tags=["deviation"])
+=======
+from app.services.deviation.file_extract.file_extract_router import router as file_extract_router
+
+# Register incident routes
+incident_router.register_incident_routes(router)
+
+# Include file extract router under deviation tag
+router.include_router(file_extract_router, prefix="/deviation", tags=["deviation"])
+>>>>>>> ee9260355652c2ef169f270389332d43136b009e
 
 # --- DEFAULT TAG ENDPOINTS ---
 @router.post("/ai-analysis/", tags=["default"])
@@ -209,6 +219,124 @@ async def transcription_audio(audio: UploadFile = File(...)):
 # --- DEVIATION TAG ENDPOINTS ---
 
 # Import and include the investigation_router endpoints
+<<<<<<< HEAD
+=======
+from app.services.deviation.investigation.investigation_router import router as investigation_router
+router.include_router(investigation_router, prefix="/investigation/audio", tags=["deviation"])
+
+@router.post("/deviation/quality-review/", tags=["deviation"])
+async def quality_review(file: UploadFile = File(...)):
+    """Perform quality review on uploaded file."""
+    try:
+        # Read file content
+        content = await file.read()
+        text_content = content.decode('utf-8')
+        
+        # Perform quality-focused analysis
+        incident_analysis = ai_analyzer.analyze_incident(text_content)
+        document_analysis = ai_analyzer.analyze_document_for_extraction(text_content)
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "success",
+                "filename": file.filename,
+                "quality_analysis": {
+                    "incident_details": incident_analysis,
+                    "document_references": document_analysis,
+                    "quality_concerns": incident_analysis.get('quality_concerns') if incident_analysis else None,
+                    "quality_controls": incident_analysis.get('quality_controls') if incident_analysis else None
+                },
+                "message": "Quality review completed"
+            }
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Quality review error: {str(e)}")
+
+# --- CAPA TAG ENDPOINTS ---
+@router.post("/capa/details/", tags=["capa"])
+async def capa_details(file: UploadFile = File(...)):
+    """Extract CAPA details from uploaded file."""
+    try:
+        # Read file content
+        content = await file.read()
+        text_content = content.decode('utf-8')
+        
+        # Analyze for CAPA information
+        capa_analysis = ai_analyzer.analyze_capa(text_content)
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "success",
+                "filename": file.filename,
+                "capa_details": capa_analysis,
+                "message": "CAPA details extraction completed"
+            }
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"CAPA details error: {str(e)}")
+
+@router.post("/capa/review/", tags=["capa"])
+async def capa_review(file: UploadFile = File(...)):
+    """Review CAPA from uploaded file."""
+    try:
+        # Read file content
+        content = await file.read()
+        text_content = content.decode('utf-8')
+        
+        # Perform CAPA analysis and review
+        capa_analysis = ai_analyzer.analyze_capa(text_content)
+        incident_analysis = ai_analyzer.analyze_incident(text_content)
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "success",
+                "filename": file.filename,
+                "capa_review": {
+                    "capa_details": capa_analysis,
+                    "related_incident": incident_analysis,
+                    "effectiveness_assessment": "Review required for implementation effectiveness"
+                },
+                "message": "CAPA review completed"
+            }
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"CAPA review error: {str(e)}")
+
+@router.post("/capa/documents/", tags=["capa"])
+async def capa_documents(file: UploadFile = File(...)):
+    """Process CAPA documents from uploaded file."""
+    try:
+        # Read file content
+        content = await file.read()
+        text_content = content.decode('utf-8')
+        
+        # Analyze documents for CAPA
+        document_analysis = ai_analyzer.analyze_document_for_extraction(text_content)
+        capa_analysis = ai_analyzer.analyze_capa(text_content)
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "success",
+                "filename": file.filename,
+                "document_analysis": document_analysis,
+                "capa_information": capa_analysis,
+                "message": "CAPA documents processing completed"
+            }
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"CAPA documents error: {str(e)}")
+
+# Include the main router in the app
+app.include_router(router)
+>>>>>>> ee9260355652c2ef169f270389332d43136b009e
 
 # Root endpoints
 @app.get("/")

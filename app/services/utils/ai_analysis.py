@@ -280,8 +280,15 @@ Focus on: what happened, who was involved, and the key concern.
             return self.analyze_with_prompt(prompt)
                 
         except Exception as e:
+<<<<<<< HEAD
                         return None
 
+=======
+            print(f"❌ Error getting summary: {str(e)}")
+            return None
+
+    
+>>>>>>> ee9260355652c2ef169f270389332d43136b009e
     def analyze_capa(self, transcript):
         """
         Analyze transcript for CAPA information
@@ -384,7 +391,45 @@ INSTRUCTIONS:
             return capa_data
             
         except Exception as e:
+<<<<<<< HEAD
                         return None
+=======
+            print(f"❌ Error parsing CAPA response: {str(e)}")
+            return None
+
+    def analyze_with_prompt(self, prompt: str) -> str:
+        """
+        Analyze content with a custom prompt and return the AI's response as a string.
+        """
+        try:
+            headers = {
+                'Authorization': f'Bearer {self.openai_api_key}',
+                'Content-Type': 'application/json'
+            }
+            data = {
+                'model': 'gpt-4o',
+                'messages': [
+                    {'role': 'user', 'content': prompt}
+                ],
+                'max_tokens': 2000,
+                'temperature': 0.2
+            }
+            response = requests.post(
+                'https://api.openai.com/v1/chat/completions',
+                headers=headers,
+                json=data,
+                timeout=60
+            )
+            if response.status_code == 200:
+                result = response.json()
+                return result['choices'][0]['message']['content'].strip()
+            else:
+                print(f"❌ API Error: {response.status_code}")
+                return None
+        except Exception as e:
+            print(f"❌ Error in analyze_with_prompt: {str(e)}")
+            return None
+>>>>>>> ee9260355652c2ef169f270389332d43136b009e
 
     def analyze_investigation_context(self, context: str) -> dict:
         """

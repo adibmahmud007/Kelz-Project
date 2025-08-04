@@ -1,307 +1,79 @@
-from typing import Dict, List, Optional, Any
-from fastapi import APIRouter, HTTPException
-from app.services.utils.ai_analysis import AIAnalyzer
-from app.services.utils.transcription import VoiceTranscriber
-from app.services.utils.document_ocr import DocumentOCR
-import logging
+from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi.responses import JSONResponse
+import tempfile, os
+from app.services.deviation.investigation.investigation import InvestigationService
 
 router = APIRouter()
 
-logger = logging.getLogger(__name__)
+def ensure_string(val):
+    if isinstance(val, list):
+        return "; ".join(str(v) for v in val)
+    return str(val) if val is not None else "Not found in document"
 
-class InvestigationService:
-    """
-    Service for processing deviation investigations including analysis,
-    root cause determination, and corrective action recommendations.
-    """
-    
-    def __init__(self):
-        self.ai_analyzer = AIAnalyzer()
-        self.transcriber = VoiceTranscriber()
-        self.text_extract = DocumentOCRProcessor()
-    
-    def process_investigation(self, 
-                            incident_description: str,
-                            background_details: str,
-                            deviation_triage: Dict[str, Any],
-                            attachments: List[str] = None) -> Dict[str, Any]:
-        """
-        Process a complete investigation based on deviation report data.
-        
-        Args:
-            incident_description: Description of the incident from transcription
-            background_details: Background details from deviation report
-            deviation_triage: Triage information selected by user
-            attachments: List of attachment file paths
-            
-        Returns:
-            Dict containing complete investigation analysis
-        """
-        try:
-            # Extract attachment content if provided
-            attachment_content = []
-            if attachments:
-                for attachment_path in attachments:
-                    content = self.text_extractor.extract_text(attachment_path)
-                    if content:
-                        attachment_content.append(content)
-            
-            # Prepare investigation context
-            investigation_context = self._prepare_investigation_context(
-                incident_description, 
-                background_details, 
-                deviation_triage, 
-                attachment_content
-            )
-            
-            # Generate investigation analysis
-            investigation_result = self._generate_investigation_analysis(investigation_context)
-            
-            return investigation_result
-            
-        except Exception as e:
-            logger.error(f"Error processing investigation: {str(e)}")
-            raise Exception(f"Investigation processing failed: {str(e)}")
-    
-    def _prepare_investigation_context(self, 
-                                     incident_description: str,
-                                     background_details: str,
-                                     deviation_triage: Dict[str, Any],
-                                     attachment_content: List[str]) -> str:
-        """
-        Prepare comprehensive context for AI analysis.
-        
-        Args:
-            incident_description: Incident description
-            background_details: Background information
-            deviation_triage: Triage assessment data
-            attachment_content: Content from attachments
-            
-        Returns:
-            Formatted context string for AI analysis
-        """
-        context_parts = [
-            "=== DEVIATION INVESTIGATION CONTEXT ===\n",
-            f"INCIDENT DESCRIPTION:\n{incident_description}\n",
-            f"BACKGROUND DETAILS:\n{background_details}\n",
-            "\nTRIAGE ASSESSMENT:",
-            f"- Deviation Theme: {deviation_triage.get('deviation_theme', 'Not specified')}",
-            f"- Impact Assessment: {deviation_triage.get('impact_assessment', 'Not specified')}",
-            f"- Product Quality: {deviation_triage.get('product_quality', 'Not specified')}",
-            f"- Patient Safety: {deviation_triage.get('patient_safety', 'Not specified')}",
-            f"- Regulatory Impact: {deviation_triage.get('regulatory_impact', 'Not specified')}",
-            f"- Validation Impact: {deviation_triage.get('validation_impact', 'Not specified')}",
-            f"- Criticality: {deviation_triage.get('criticality', 'Not specified')}\n"
-        ]
-        
-        if attachment_content:
-            context_parts.append("\nATTACHMENT CONTENT:")
-            for i, content in enumerate(attachment_content, 1):
-                context_parts.append(f"--- Attachment {i} ---")
-                context_parts.append(content[:1000] + "..." if len(content) > 1000 else content)
-                context_parts.append("")
-        
-        return "\n".join(context_parts)
-    
-    def _generate_investigation_analysis(self, context: str) -> Dict[str, Any]:
-        """
-        Generate comprehensive investigation analysis using AI.
-        
-        Args:
-            context: Investigation context for analysis
-            
-        Returns:
-            Dict containing investigation results
-        """
-        investigation_prompt = f"""
-        Based on the following deviation investigation context, provide a comprehensive analysis:
+@router.post("/investigation-full/", tags=["deviation"])
+async def investigation_full(file: UploadFile = File(...)):
+    temp_file_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as temp_file:
+            temp_file_path = temp_file.name
+            content = await file.read()
+            temp_file.write(content)
 
-        {context}
+        # Step 1: Extract text or transcribe audio
+        extension = os.path.splitext(file.filename)[1].lower()
+        if extension in [".mp3", ".wav", ".m4a", ".flac", ".ogg"]:
+            from app.services.utils.transcription import VoiceTranscriber
+            transcriber = VoiceTranscriber()
+            transcribed_text = transcriber.transcribe_audio(temp_file_path)
+            if not transcribed_text or not transcribed_text.strip():
+                raise HTTPException(status_code=400, detail="Transcription failed or returned empty text.")
+            extracted_text = transcribed_text
+        else:
+            from app.services.utils.document_ocr import DocumentOCR
+            ocr = DocumentOCR()
+            extracted_text = ocr.extract_text(temp_file_path)
+            if not extracted_text or not extracted_text.strip():
+                raise HTTPException(status_code=400, detail="No text could be extracted from the document.")
 
-        Please provide a detailed investigation analysis in the following JSON format:
-        {{
-            "background_summary": "Concise summary of the incident background",
-            "discussion": {{
-                "timeline": "Detailed timeline of events",
-                "affected_systems": ["List of affected systems/processes"],
-                "initial_findings": "Key initial findings from the investigation"
-            }},
-            "root_cause_analysis": {{
-                "primary_cause": "Main root cause identified",
-                "contributing_factors": ["List of contributing factors"],
-                "methodology": "Root cause analysis methodology used",
-                "evidence": ["Supporting evidence for the root cause"]
-            }},
-            "final_assessment": {{
-                "impact_analysis": "Detailed impact assessment",
-                "risk_evaluation": "Risk evaluation and classification",
-                "compliance_implications": "Regulatory and compliance implications",
-                "recurrence_probability": "Assessment of recurrence likelihood"
-            }},
-            "capa_recommendations": {{
-                "immediate_actions": ["Immediate corrective actions needed"],
-                "long_term_actions": ["Long-term preventive actions"],
-                "responsible_parties": ["Departments/roles responsible for actions"],
-                "timeline": "Recommended timeline for CAPA implementation"
-            }},
-            "ai_generated_insights": {{
-                "pattern_analysis": "Analysis of similar incidents or patterns",
-                "risk_mitigation": "Additional risk mitigation suggestions",
-                "process_improvements": ["Suggested process improvements"],
-                "monitoring_recommendations": ["Ongoing monitoring recommendations"]
-            }}
-        }}
+        # Step 2: AI analysis using InvestigationService
+        ai_result = InvestigationService.analyze_transcript(extracted_text)
 
-        Ensure the analysis is thorough, professional, and follows pharmaceutical industry standards for deviation investigations.
-        """
-        
-        try:
-            # Use the AI analyzer to process the investigation
-            raw_analysis = self.ai_analyzer.analyze_with_prompt(investigation_prompt)
-            
-            # Parse and structure the response
-            investigation_result = self._parse_investigation_response(raw_analysis)
-            
-            return investigation_result
-            
-        except Exception as e:
-            logger.error(f"Error generating investigation analysis: {str(e)}")
-            # Return a fallback structure if AI analysis fails
-            return self._get_fallback_investigation_result()
-    
-    def _parse_investigation_response(self, raw_response: str) -> Dict[str, Any]:
-        """
-        Parse AI response and ensure proper structure.
-        
-        Args:
-            raw_response: Raw response from AI analyzer
-            
-        Returns:
-            Structured investigation result
-        """
-        try:
-            import json
-            
-            # Try to parse as JSON first
-            if raw_response.strip().startswith('{'):
-                return json.loads(raw_response)
-            
-            # If not JSON, create structured response from text
-            return {
-                "background_summary": self._extract_section(raw_response, "background", "summary"),
-                "discussion": {
-                    "timeline": self._extract_section(raw_response, "timeline", "events"),
-                    "affected_systems": self._extract_list_items(raw_response, "affected", "systems"),
-                    "initial_findings": self._extract_section(raw_response, "findings", "initial")
-                },
-                "root_cause_analysis": {
-                    "primary_cause": self._extract_section(raw_response, "root cause", "primary"),
-                    "contributing_factors": self._extract_list_items(raw_response, "contributing", "factors"),
-                    "methodology": self._extract_section(raw_response, "methodology", "analysis"),
-                    "evidence": self._extract_list_items(raw_response, "evidence", "support")
-                },
-                "final_assessment": {
-                    "impact_analysis": self._extract_section(raw_response, "impact", "assessment"),
-                    "risk_evaluation": self._extract_section(raw_response, "risk", "evaluation"),
-                    "compliance_implications": self._extract_section(raw_response, "compliance", "regulatory"),
-                    "recurrence_probability": self._extract_section(raw_response, "recurrence", "probability")
-                },
-                "capa_recommendations": {
-                    "immediate_actions": self._extract_list_items(raw_response, "immediate", "actions"),
-                    "long_term_actions": self._extract_list_items(raw_response, "long.term", "preventive"),
-                    "responsible_parties": self._extract_list_items(raw_response, "responsible", "parties"),
-                    "timeline": self._extract_section(raw_response, "timeline", "implementation")
-                },
-                "ai_generated_insights": {
-                    "pattern_analysis": self._extract_section(raw_response, "pattern", "analysis"),
-                    "risk_mitigation": self._extract_section(raw_response, "mitigation", "risk"),
-                    "process_improvements": self._extract_list_items(raw_response, "improvements", "process"),
-                    "monitoring_recommendations": self._extract_list_items(raw_response, "monitoring", "recommendations")
-                }
-            }
-            
-        except Exception as e:
-            logger.error(f"Error parsing investigation response: {str(e)}")
-            return self._get_fallback_investigation_result()
-    
-    def _extract_section(self, text: str, *keywords) -> str:
-        """Extract a text section based on keywords."""
-        text_lower = text.lower()
-        for keyword in keywords:
-            if keyword.lower() in text_lower:
-                # Simple extraction logic - can be enhanced
-                start_idx = text_lower.find(keyword.lower())
-                if start_idx != -1:
-                    # Extract following 200 characters as a simple heuristic
-                    return text[start_idx:start_idx + 200].strip()
-        return "Analysis not available in current response format"
-    
-    def _extract_list_items(self, text: str, *keywords) -> List[str]:
-        """Extract list items based on keywords."""
-        # Simple implementation - can be enhanced with better parsing
-        items = []
-        lines = text.split('\n')
-        for line in lines:
-            line_lower = line.lower()
-            if any(keyword.lower() in line_lower for keyword in keywords):
-                if '-' in line or '•' in line or line.strip().startswith(('1.', '2.', '3.')):
-                    items.append(line.strip())
-        return items[:5] if items else ["Items not identified in current analysis"]
-    
-    def _get_fallback_investigation_result(self) -> Dict[str, Any]:
-        """
-        Provide fallback investigation structure when AI analysis fails.
-        
-        Returns:
-            Basic investigation structure
-        """
-        return {
-            "background_summary": "Investigation analysis is being processed. Please review manually.",
-            "discussion": {
-                "timeline": "Timeline analysis pending manual review.",
-                "affected_systems": ["System analysis pending"],
-                "initial_findings": "Initial findings require manual assessment."
+        # Build the response, ensuring all fields are strings
+        response = {
+            "Background": ensure_string(ai_result.get("Background", "Not found in document")),
+            "Deviation_Triage": ensure_string(ai_result.get("Deviation Triage", "Not found in document")),
+            "Discussion": {
+                "process": ensure_string(ai_result.get("Discussion", {}).get("process", "Not found in document")) if isinstance(ai_result.get("Discussion"), dict) else "Not found in document",
+                "equipment": ensure_string(ai_result.get("Discussion", {}).get("equipment", "Not found in document")) if isinstance(ai_result.get("Discussion"), dict) else "Not found in document",
+                "environment_people": ensure_string(ai_result.get("Discussion", {}).get("environment_people", "Not found in document")) if isinstance(ai_result.get("Discussion"), dict) else "Not found in document",
+                "documentation": ensure_string(ai_result.get("Discussion", {}).get("documentation", "Not found in document")) if isinstance(ai_result.get("Discussion"), dict) else "Not found in document",
             },
-            "root_cause_analysis": {
-                "primary_cause": "Root cause analysis in progress.",
-                "contributing_factors": ["Contributing factors analysis pending"],
-                "methodology": "Standard root cause analysis methodology to be applied.",
-                "evidence": ["Evidence collection and analysis pending"]
+            "Root_Cause_Analysis": {
+                "5_why": ensure_string(ai_result.get("Root Cause Analysis", {}).get("5_why", "Not found in document")) if isinstance(ai_result.get("Root Cause Analysis"), dict) else "Not found in document",
+                "Fishbone": ensure_string(ai_result.get("Root Cause Analysis", {}).get("Fishbone", "Not found in document")) if isinstance(ai_result.get("Root Cause Analysis"), dict) else "Not found in document",
+                "5Ms": ensure_string(ai_result.get("Root Cause Analysis", {}).get("5Ms", "Not found in document")) if isinstance(ai_result.get("Root Cause Analysis"), dict) else "Not found in document",
+                "FMEA": ensure_string(ai_result.get("Root Cause Analysis", {}).get("FMEA", "Not found in document")) if isinstance(ai_result.get("Root Cause Analysis"), dict) else "Not found in document",
             },
-            "final_assessment": {
-                "impact_analysis": "Impact assessment requires detailed review.",
-                "risk_evaluation": "Risk evaluation pending.",
-                "compliance_implications": "Compliance review required.",
-                "recurrence_probability": "Recurrence assessment pending."
+            "Final_Assessment": {
+                "Patient_Safety": ensure_string(ai_result.get("Final Assessment", {}).get("Patient_Safety", "Not found in document")) if isinstance(ai_result.get("Final Assessment"), dict) else "Not found in document",
+                "Product_Quality": ensure_string(ai_result.get("Final Assessment", {}).get("Product_Quality", "Not found in document")) if isinstance(ai_result.get("Final Assessment"), dict) else "Not found in document",
+                "Compliance_Impact": ensure_string(ai_result.get("Final Assessment", {}).get("Compliance_Impact", "Not found in document")) if isinstance(ai_result.get("Final Assessment"), dict) else "Not found in document",
+                "Validation_Impact": ensure_string(ai_result.get("Final Assessment", {}).get("Validation_Impact", "Not found in document")) if isinstance(ai_result.get("Final Assessment"), dict) else "Not found in document",
+                "Regulatory_Impact": ensure_string(ai_result.get("Final Assessment", {}).get("Regulatory_Impact", "Not found in document")) if isinstance(ai_result.get("Final Assessment"), dict) else "Not found in document",
             },
-            "capa_recommendations": {
-                "immediate_actions": ["Immediate containment measures to be determined"],
-                "long_term_actions": ["Long-term preventive actions to be defined"],
-                "responsible_parties": ["Responsibility assignment pending"],
-                "timeline": "CAPA timeline to be established."
+            "Historic_Review": {
+                "previous_occurrence": ensure_string(ai_result.get("Historic Review", {}).get("previous_occurrence", "Not found in document")) if isinstance(ai_result.get("Historic Review"), dict) else "Not found in document",
+                "impact_to_adequacy_of_RCA_and_CAPA": ensure_string(ai_result.get("Historic Review", {}).get("impact_to_adequacy_of_RCA_and_CAPA", "Not found in document")) if isinstance(ai_result.get("Historic Review"), dict) else "Not found in document",
             },
-            "ai_generated_insights": {
-                "pattern_analysis": "Pattern analysis requires historical data review.",
-                "risk_mitigation": "Additional risk mitigation strategies to be identified.",
-                "process_improvements": ["Process improvement opportunities to be assessed"],
-                "monitoring_recommendations": ["Monitoring strategy to be developed"]
-            }
+            "CAPA": {
+                "Correction": ensure_string(ai_result.get("CAPA", {}).get("Correction", "Not found in document")) if isinstance(ai_result.get("CAPA"), dict) else "Not found in document",
+                "Interim_Action": ensure_string(ai_result.get("CAPA", {}).get("Interim_Action", "Not found in document")) if isinstance(ai_result.get("CAPA"), dict) else "Not found in document",
+                "Corrective_Action": ensure_string(ai_result.get("CAPA", {}).get("Corrective_Action", "Not found in document")) if isinstance(ai_result.get("CAPA"), dict) else "Not found in document",
+                "Preventive_Action": ensure_string(ai_result.get("CAPA", {}).get("Preventive_Action", "Not found in document")) if isinstance(ai_result.get("CAPA"), dict) else "Not found in document",
+            },
+            "Investigation_Summary": ensure_string(ai_result.get("Investigation Summary", "Not found in document")),
         }
-    
-    def get_investigation_summary(self, investigation_data: Dict[str, Any]) -> Dict[str, str]:
-        """
-        Generate a concise summary of the investigation results.
-        
-        Args:
-            investigation_data: Complete investigation analysis
-            
-        Returns:
-            Dict containing summary information
-        """
-        return {
-            "summary": investigation_data.get("background_summary", ""),
-            "primary_cause": investigation_data.get("root_cause_analysis", {}).get("primary_cause", ""),
-            "impact_level": investigation_data.get("final_assessment", {}).get("risk_evaluation", ""),
-            "immediate_actions_count": len(investigation_data.get("capa_recommendations", {}).get("immediate_actions", [])),
-            "long_term_actions_count": len(investigation_data.get("capa_recommendations", {}).get("long_term_actions", []))
-        }
+        return JSONResponse(status_code=200, content=response)
+    finally:
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.unlink(temp_file_path)

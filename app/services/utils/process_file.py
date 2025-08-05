@@ -3,7 +3,7 @@ import tempfile
 from pathlib import Path
 from PyPDF2 import PdfReader, PdfWriter
 from PIL import Image
-import fitz  # PyMuPDF for PDF operations
+import fitz  # PyMuPDF for PDF operations (correct import, do not import frontend)
 
 class FileProcessor:
     def __init__(self):

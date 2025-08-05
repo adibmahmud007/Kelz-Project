@@ -374,3 +374,175 @@ Provide ONLY the headline, no additional text.
         
         print(f"\n⏰ Processed at: {response.timestamp}")
         print("="*50)
+
+    def process_uploaded_document(self, file_content: bytes, filename: str) -> IncidentResponse:
+        """
+        Process uploaded document file (PDF, DOCX, TXT) and analyze incident
+        Args:
+            file_content (bytes): File content
+            filename (str): Original filename
+        Returns:
+            IncidentResponse: Processing response
+        """
+        import os
+        import tempfile
+        extracted_text = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as tmp_file:
+                tmp_file.write(file_content)
+                tmp_file_path = tmp_file.name
+            try:
+                ext = os.path.splitext(filename)[1].lower()
+                if ext == '.pdf':
+                    try:
+                        from PyPDF2 import PdfReader
+                        reader = PdfReader(tmp_file_path)
+                        texts = []
+                        for i, page in enumerate(reader.pages):
+                            page_text = page.extract_text()
+                            if page_text:
+                                texts.append(page_text)
+                        extracted_text = "\n".join(texts)
+                        print(f"[PDF Extraction] Extracted {len(extracted_text)} characters from PDF '{filename}'")
+                        # If no text, try OCR on images
+                        if not extracted_text.strip():
+                            try:
+                                from pdf2image import convert_from_path
+                                import pytesseract
+                                ocr_texts = []
+                                images = convert_from_path(tmp_file_path)
+                                for i, image in enumerate(images):
+                                    ocr_text = pytesseract.image_to_string(image)
+                                    if ocr_text:
+                                        ocr_texts.append(ocr_text)
+                                extracted_text = "\n".join(ocr_texts)
+                                print(f"[PDF OCR] Extracted {len(extracted_text)} characters from OCR for PDF '{filename}'")
+                                if not extracted_text.strip():
+                                    return IncidentResponse(
+                                        success=False,
+                                        message="No extractable text found in the PDF (neither text-based nor via OCR).",
+                                        transcription=None,
+                                        incident_description=None,
+                                        headline=None,
+                                        analysis=None
+                                    )
+                            except Exception as ocr_e:
+                                return IncidentResponse(
+                                    success=False,
+                                    message=f"Failed to extract text from PDF via OCR: {str(ocr_e)}",
+                                    transcription=None,
+                                    incident_description=None,
+                                    headline=None,
+                                    analysis=None
+                                )
+                    except Exception as e:
+                        return IncidentResponse(
+                            success=False,
+                            message=f"Failed to extract text from PDF: {str(e)}",
+                            transcription=None,
+                            incident_description=None,
+                            headline=None,
+                            analysis=None
+                        )
+                elif ext == '.docx':
+                    try:
+                        import docx
+                        doc = docx.Document(tmp_file_path)
+                        extracted_text = "\n".join([para.text for para in doc.paragraphs])
+                    except Exception as e:
+                        return IncidentResponse(
+                            success=False,
+                            message=f"Failed to extract text from DOCX: {str(e)}",
+                            transcription=None,
+                            incident_description=None,
+                            headline=None,
+                            analysis=None
+                        )
+                elif ext == '.txt':
+                    try:
+                        with open(tmp_file_path, 'r', encoding='utf-8') as f:
+                            extracted_text = f.read()
+                    except Exception as e:
+                        return IncidentResponse(
+                            success=False,
+                            message=f"Failed to read TXT file: {str(e)}",
+                            transcription=None,
+                            incident_description=None,
+                            headline=None,
+                            analysis=None
+                        )
+                else:
+                    return IncidentResponse(
+                        success=False,
+                        message=f"Unsupported document file type: {ext}",
+                        transcription=None,
+                        incident_description=None,
+                        headline=None,
+                        analysis=None
+                    )
+                if not extracted_text or not extracted_text.strip():
+                    return IncidentResponse(
+                        success=False,
+                        message="No text could be extracted from the document.",
+                        transcription=None,
+                        incident_description=None,
+                        headline=None,
+                        analysis=None
+                    )
+                # --- Robust Preprocessing for Extracted Text ---
+                def clean_text(text):
+                    import re
+                    # Remove repeated headers/footers (lines repeated more than 3 times)
+                    lines = text.splitlines()
+                    from collections import Counter
+                    line_counts = Counter(lines)
+                    cleaned_lines = [line for line in lines if line_counts[line] <= 3]
+                    # Remove empty lines and lines with only special characters
+                    cleaned_lines = [line for line in cleaned_lines if line.strip() and re.search(r'[A-Za-z0-9]', line)]
+                    cleaned = "\n".join(cleaned_lines)
+                    # Remove excessive whitespace
+                    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+                    return cleaned.strip()
+
+                cleaned_text = clean_text(extracted_text)
+                # Truncate to 4000 characters for AI prompt
+                max_len = 4000
+                truncated_text = cleaned_text[:max_len]
+
+                # Add context if the document looks like a form/table
+                if any(keyword in truncated_text.lower() for keyword in ["form", "table", "date", "signature", "approved by", "reviewed by", "agreement", "contract", "qta"]):
+                    context_prompt = (
+                        "This document appears to be a form, table, or contract/agreement. "
+                        "If it is a contract or agreement (such as a Quality Technical Agreement), extract and summarize: "
+                        "- The parties involved\n- Effective dates\n- Main responsibilities\n- Any sections related to deviations, incidents, or quality\n" 
+                        "If it is a form or table, extract and summarize any incident, deviation, or key information relevant to pharmaceutical quality, compliance, or investigation. "
+                        "If the document is a blank form, state that no incident information is present.\n\n"
+                    )
+                    ai_input = context_prompt + truncated_text
+                else:
+                    ai_input = truncated_text
+
+                # Debug: Log and return extracted text if analysis fails
+                analysis_result = self.process_incident_from_text(ai_input)
+                if not analysis_result.success:
+                    return IncidentResponse(
+                        success=False,
+                        message="Failed to analyze incident. Extracted/cleaned text was: " + (ai_input[:500] + ("..." if len(ai_input) > 500 else "")),
+                        transcription=ai_input,
+                        incident_description=None,
+                        headline=None,
+                        analysis=None
+                    )
+                return analysis_result
+            finally:
+                if os.path.exists(tmp_file_path):
+                    os.unlink(tmp_file_path)
+        except Exception as e:
+            return IncidentResponse(
+                success=False,
+                message=f"Error processing uploaded document: {str(e)}",
+                transcription=None,
+                incident_description=None,
+                headline=None,
+                analysis=None
+            )

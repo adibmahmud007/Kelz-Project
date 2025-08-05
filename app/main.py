@@ -25,33 +25,15 @@ document_ocr = DocumentOCR()
 
 # Import and include routers
 from app.services.deviation.incident import incident_router
-<<<<<<< HEAD
-from app.services.deviation.file_extract import file_extract_router
-from app.services.deviation.quality_review import quality_review_router
-from app.services.deviation.investigation import investigation_router
-
-
-# Register incident routes
-incident_router.register_incident_routes(router)
-app.include_router(file_extract_router.router)
-app.include_router(quality_review_router.router)
-app.include_router(investigation_router.router)
-
-# # Include file extract router under deviation tag
-# router.include_router(file_extract_router, prefix="/deviation", tags=["deviation"])
-# # Include quality review router
-# router.include_router(quality_review_router, prefix="/quality-review", tags=["deviation"])
-# # Include investigation router
-# router.include_router(investigation_router, prefix="/investigation/audio", tags=["deviation"])
-=======
 from app.services.deviation.file_extract.file_extract_router import router as file_extract_router
+from app.services.deviation.investigation.investigation_router import router as investigation_router
 
 # Register incident routes
 incident_router.register_incident_routes(router)
 
 # Include file extract router under deviation tag
 router.include_router(file_extract_router, prefix="/deviation", tags=["deviation"])
->>>>>>> ee9260355652c2ef169f270389332d43136b009e
+router.include_router(investigation_router, prefix="/investigation/audio", tags=["deviation"])
 
 # --- DEFAULT TAG ENDPOINTS ---
 @router.post("/ai-analysis/", tags=["default"])
@@ -218,12 +200,6 @@ async def transcription_audio(audio: UploadFile = File(...)):
 
 # --- DEVIATION TAG ENDPOINTS ---
 
-# Import and include the investigation_router endpoints
-<<<<<<< HEAD
-=======
-from app.services.deviation.investigation.investigation_router import router as investigation_router
-router.include_router(investigation_router, prefix="/investigation/audio", tags=["deviation"])
-
 @router.post("/deviation/quality-review/", tags=["deviation"])
 async def quality_review(file: UploadFile = File(...)):
     """Perform quality review on uploaded file."""
@@ -336,7 +312,6 @@ async def capa_documents(file: UploadFile = File(...)):
 
 # Include the main router in the app
 app.include_router(router)
->>>>>>> ee9260355652c2ef169f270389332d43136b009e
 
 # Root endpoints
 @app.get("/")

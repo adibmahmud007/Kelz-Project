@@ -16,7 +16,6 @@ sys.path.insert(0, app_dir)
 
 from app.config.config import OPENAI_API_KEY
 
-
 class AIAnalyzer:
     def __init__(self):
         # Load configuration from environment
@@ -60,35 +59,19 @@ class AIAnalyzer:
             )
             if response.status_code == 200:
                 result = response.json()
-                # Debug API usage
-                if 'usage' in result:
-                    usage = result['usage']
                 ai_response = result['choices'][0]['message']['content'].strip()
-                # Additional response validation
                 if not ai_response:
                     return None
                 if len(ai_response) < 100:
                     return ai_response
                 return ai_response
             elif response.status_code == 429:
-                try:
-                    error_detail = response.json()
-                except Exception:
-                    pass
                 return None
             elif response.status_code == 401:
                 return None
             elif response.status_code == 400:
-                try:
-                    error_detail = response.json()
-                except Exception:
-                    pass
                 return None
             else:
-                try:
-                    error_detail = response.json()
-                except Exception:
-                    return None
                 return None
         except requests.exceptions.Timeout:
             return None
@@ -102,35 +85,24 @@ class AIAnalyzer:
             import traceback
             return None
 
-    # Keep all existing methods for backward compatibility
     def analyze_incident(self, transcribed_text):
         """
         Analyze transcribed text and extract incident information
-        
-        Args:
-            transcribed_text (str): The transcribed text from audio
-            
-        Returns:
-            dict: Structured incident information or None if failed
         """
         try:
-            # Get structured analysis
             structured_data = self._get_structured_analysis(transcribed_text)
-            
             if structured_data:
                 return structured_data
             else:
-                                return None
-                
+                return None
         except Exception as e:
-                        return None
-    
+            return None
+
     def _get_structured_analysis(self, transcribed_text):
         """
         Get structured analysis using improved prompting
         """
         try:
-            # Enhanced prompt with better instructions
             prompt = f"""
 You are an expert incident analyst. Analyze the following transcript and extract incident information. 
 
@@ -161,35 +133,26 @@ INSTRUCTIONS:
 - Focus on extracting facts from the transcript
 - Provide actionable recommendations for RCA_TOOL, EXPECTED_INTERIM_ACTION, and CAPA
 """
-            
-            # Use the enhanced analyze_with_prompt method
             analysis_text = self.analyze_with_prompt(prompt)
-            
             if analysis_text and self._validate_analysis_text(analysis_text):
-                # Parse the structured response
                 incident_data = self._parse_enhanced_response(analysis_text)
-                
                 if incident_data and self._validate_analysis(incident_data):
-                                        return incident_data
+                    return incident_data
                 else:
-                                        return None
+                    return None
             else:
-                                return None
-                
+                return None
         except Exception as e:
-                        return None
-    
+            return None
+
     def _validate_analysis_text(self, analysis_text):
         """Validate that the analysis text contains meaningful content"""
         if not analysis_text or len(analysis_text) < 50:
             return False
-        
-        # Check for key markers
         required_markers = ['INCIDENT_TITLE:', 'WHO:', 'WHAT:', 'WHERE:']
         found_markers = sum(1 for marker in required_markers if marker in analysis_text)
-        
         return found_markers >= 3
-    
+
     def _parse_enhanced_response(self, analysis_text):
         """
         Parse the enhanced AI response with better error handling
@@ -207,17 +170,12 @@ INSTRUCTIONS:
                 'expected_interim_action': '',
                 'capa': ''
             }
-            
-            # Extract content between markers if present
             start_marker = "===ANALYSIS START==="
             end_marker = "===ANALYSIS END==="
-            
             if start_marker in analysis_text and end_marker in analysis_text:
                 content = analysis_text.split(start_marker)[1].split(end_marker)[0]
             else:
                 content = analysis_text
-            
-            # Parse using regex for more robust extraction
             patterns = {
                 'title': r'INCIDENT_TITLE:\s*(.+?)(?=\n\w+:|$)',
                 'who': r'WHO:\s*(.+?)(?=\n\w+:|$)',
@@ -230,40 +188,31 @@ INSTRUCTIONS:
                 'expected_interim_action': r'EXPECTED_INTERIM_ACTION:\s*(.+?)(?=\n\w+:|$)',
                 'capa': r'CAPA:\s*(.+?)(?=\n\w+:|$)'
             }
-            
             for key, pattern in patterns.items():
                 match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
                 if match:
                     value = match.group(1).strip()
-                    # Clean up the value
-                    value = re.sub(r'\n\s*', ' ', value)  # Replace newlines with spaces
-                    value = re.sub(r'\s+', ' ', value)    # Normalize whitespace
+                    value = re.sub(r'\n\s*', ' ', value)
+                    value = re.sub(r'\s+', ' ', value)
                     incident_data[key] = value
-            
             return incident_data
-            
         except Exception as e:
-                        return None
-    
+            return None
+
     def _validate_analysis(self, incident_data):
         """
         Validate that the analysis contains meaningful information
         """
         if not incident_data:
             return False
-        
-        # Check if at least title and what are filled with meaningful content
         title = incident_data.get('title', '').strip()
         what = incident_data.get('what', '').strip()
-        
         if not title or title == 'N/A' or len(title) < 5:
             return False
-        
         if not what or what == 'N/A' or len(what) < 10:
             return False
-        
         return True
-    
+
     def get_summary_analysis(self, transcribed_text):
         """
         Get a quick summary analysis of the incident
@@ -276,19 +225,10 @@ Provide a brief 2-3 sentence summary of this incident:
 
 Focus on: what happened, who was involved, and the key concern.
 """
-            
             return self.analyze_with_prompt(prompt)
-                
         except Exception as e:
-<<<<<<< HEAD
-                        return None
-
-=======
-            print(f"❌ Error getting summary: {str(e)}")
             return None
 
-    
->>>>>>> ee9260355652c2ef169f270389332d43136b009e
     def analyze_capa(self, transcript):
         """
         Analyze transcript for CAPA information
@@ -319,22 +259,17 @@ INSTRUCTIONS:
 - Determine the type of documents referenced
 - If information is not available, write "Not specified in transcript"
 """
-            
             analysis_text = self.analyze_with_prompt(prompt)
-            
             if analysis_text:
-                # Parse the structured response
                 capa_data = self._parse_capa_response(analysis_text)
-                
                 if capa_data:
-                                        return capa_data
+                    return capa_data
                 else:
-                                        return None
+                    return None
             else:
-                                return None
-                
+                return None
         except Exception as e:
-                        return None
+            return None
 
     def _parse_capa_response(self, analysis_text):
         """
@@ -349,17 +284,12 @@ INSTRUCTIONS:
                 'sections': [],
                 'doc_type': ''
             }
-            
-            # Extract content between markers if present
             start_marker = "===CAPA ANALYSIS START==="
             end_marker = "===CAPA ANALYSIS END==="
-            
             if start_marker in analysis_text and end_marker in analysis_text:
                 content = analysis_text.split(start_marker)[1].split(end_marker)[0]
             else:
                 content = analysis_text
-            
-            # Parse using regex
             patterns = {
                 'title': r'CAPA_TITLE:\s*(.+?)(?=\n\w+:|$)',
                 'description': r'CAPA_DESCRIPTION:\s*(.+?)(?=\n\w+:|$)',
@@ -368,16 +298,12 @@ INSTRUCTIONS:
                 'sections': r'DOCUMENT_SECTIONS:\s*(.+?)(?=\n\w+:|$)',
                 'doc_type': r'DOCUMENT_TYPE:\s*(.+?)(?=\n\w+:|$)'
             }
-            
             for key, pattern in patterns.items():
                 match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
                 if match:
                     value = match.group(1).strip()
-                    # Clean up the value
-                    value = re.sub(r'\n\s*', ' ', value)  # Replace newlines with spaces
-                    value = re.sub(r'\s+', ' ', value)    # Normalize whitespace
-                    
-                    # For lists, split by common delimiters
+                    value = re.sub(r'\n\s*', ' ', value)
+                    value = re.sub(r'\s+', ' ', value)
                     if key in ['actions', 'document_refs', 'sections'] and value:
                         if ',' in value:
                             capa_data[key] = [item.strip() for item in value.split(',')]
@@ -387,59 +313,13 @@ INSTRUCTIONS:
                             capa_data[key] = [value]
                     else:
                         capa_data[key] = value
-            
             return capa_data
-            
         except Exception as e:
-<<<<<<< HEAD
-                        return None
-=======
-            print(f"❌ Error parsing CAPA response: {str(e)}")
             return None
-
-    def analyze_with_prompt(self, prompt: str) -> str:
-        """
-        Analyze content with a custom prompt and return the AI's response as a string.
-        """
-        try:
-            headers = {
-                'Authorization': f'Bearer {self.openai_api_key}',
-                'Content-Type': 'application/json'
-            }
-            data = {
-                'model': 'gpt-4o',
-                'messages': [
-                    {'role': 'user', 'content': prompt}
-                ],
-                'max_tokens': 2000,
-                'temperature': 0.2
-            }
-            response = requests.post(
-                'https://api.openai.com/v1/chat/completions',
-                headers=headers,
-                json=data,
-                timeout=60
-            )
-            if response.status_code == 200:
-                result = response.json()
-                return result['choices'][0]['message']['content'].strip()
-            else:
-                print(f"❌ API Error: {response.status_code}")
-                return None
-        except Exception as e:
-            print(f"❌ Error in analyze_with_prompt: {str(e)}")
-            return None
->>>>>>> ee9260355652c2ef169f270389332d43136b009e
 
     def analyze_investigation_context(self, context: str) -> dict:
         """
         Specialized method for investigation context analysis.
-        
-        Args:
-            context: Investigation context string
-            
-        Returns:
-            Dictionary with investigation analysis
         """
         investigation_prompt = f"""
         Analyze the following deviation investigation context and provide comprehensive insights:
@@ -490,23 +370,18 @@ INSTRUCTIONS:
             }}
         }}
         """
-        
         try:
             response = self.analyze_with_prompt(investigation_prompt)
-            
-            # Try to parse as JSON first
             try:
                 return json.loads(response)
             except json.JSONDecodeError:
-                # If response isn't valid JSON, return structured dict
                 return {
                     "analysis": response,
                     "status": "text_response",
                     "requires_manual_parsing": True
                 }
-                
         except Exception as e:
-                        return {
+            return {
                 "analysis": f"Investigation analysis failed: {str(e)}",
                 "status": "error"
             }
@@ -515,18 +390,10 @@ INSTRUCTIONS:
     def analyze_prompt(prompt):
         """
         Generic method to analyze any prompt using OpenAI
-
-        Args:
-            prompt (str): The prompt to analyze
-
-        Returns:
-            dict: Analysis results
         """
         try:
             analyzer = AIAnalyzer()
-
             response_text = analyzer.analyze_with_prompt(prompt)
-            
             if response_text:
                 return {
                     "analysis": response_text,
@@ -537,9 +404,8 @@ INSTRUCTIONS:
                     "analysis": "Analysis failed - no response received",
                     "status": "error"
                 }
-
         except Exception as e:
-                        return {
+            return {
                 "analysis": f"Analysis failed: {str(e)}",
                 "status": "error"
             }

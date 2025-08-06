@@ -49,3 +49,12 @@ python-multipart
 python-dateutil
 pytz
 
+# Document and file processing
+python-docx
+PyPDF2
+PyMuPDF
+pandas
+reportlab
+openpyxl
+python-pptx
+

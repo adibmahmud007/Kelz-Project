@@ -57,6 +57,7 @@ class AIAnalyzer:
                 json=data,
                 timeout=120
             )
+            print("DEBUG: Raw AI response:", response.text)
             if response.status_code == 200:
                 result = response.json()
                 ai_response = result['choices'][0]['message']['content'].strip()
@@ -103,13 +104,16 @@ class AIAnalyzer:
         Get structured analysis using improved prompting
         """
         try:
+            # Truncate the input transcript to avoid context overflow
+            max_len = 2500
+            truncated_text = transcribed_text[:max_len]
             prompt = f"""
+Please answer ONLY in the exact format below. Do not add extra explanation.
+
 You are an expert incident analyst. Analyze the following transcript and extract incident information. 
+Generate a descriptive title based on the content, don't just say "Incident Report".
 
-IMPORTANT: Generate a descriptive title based on the content, don't just say "Incident Report".
-
-Please provide your analysis in this EXACT format (copy the structure exactly):
-
+Format:
 ===ANALYSIS START===
 INCIDENT_TITLE: [Generate a specific, descriptive title based on what happened]
 WHO: [People involved, their roles, departments mentioned]
@@ -121,19 +125,27 @@ QUALITY_CONTROLS: [Quality control measures that failed or were bypassed]
 RCA_TOOL: [Recommend appropriate root cause analysis method]
 EXPECTED_INTERIM_ACTION: [Actions needed to prevent immediate recurrence]
 CAPA: [Corrective and Preventive Actions needed]
+
+DEVIATION_TRIAGE: [Yes or No]
+PRODUCT_QUALITY: [If Yes, provide as JSON: {{"yes_no": "Yes", "level": "High/Medium/Low"}}; if No, {{"yes_no": "No", "level": null}}]
+PATIENT_SAFETY: [Same format as PRODUCT_QUALITY]
+REGULATORY_IMPACT: [Same format as PRODUCT_QUALITY]
+VALIDATION_IMPACT: [Yes or No]
+CUSTOMER_NOTIFICATION: [Yes or No]
+REVIEW_QTA: [String summary about Review QTA for requirements to notify customers]
+CRITICALITY: [Minor or Major]
 ===ANALYSIS END===
 
 TRANSCRIPT TO ANALYZE:
-"{transcribed_text}"
+"{truncated_text}"
 
 INSTRUCTIONS:
 - Be specific and detailed in your analysis
-- If information is not available, write "Not specified in transcript"
-- Generate a meaningful title that describes the actual incident
-- Focus on extracting facts from the transcript
-- Provide actionable recommendations for RCA_TOOL, EXPECTED_INTERIM_ACTION, and CAPA
+- If information is not available, write "Not specified in transcript" or use "No"/null as appropriate
+- For PRODUCT_QUALITY, PATIENT_SAFETY, and REGULATORY_IMPACT, use the JSON format as shown above
 """
             analysis_text = self.analyze_with_prompt(prompt)
+            print("DEBUG: analysis_text from AI:", analysis_text)
             if analysis_text and self._validate_analysis_text(analysis_text):
                 incident_data = self._parse_enhanced_response(analysis_text)
                 if incident_data and self._validate_analysis(incident_data):
@@ -168,7 +180,15 @@ INSTRUCTIONS:
                 'quality_controls': '',
                 'rca_tool': '',
                 'expected_interim_action': '',
-                'capa': ''
+                'capa': '',
+                'deviation_triage': None,
+                'product_quality': None,
+                'patient_safety': None,
+                'regulatory_impact': None,
+                'validation_impact': None,
+                'customer_notification': None,
+                'review_qta': None,
+                'criticality': None
             }
             start_marker = "===ANALYSIS START==="
             end_marker = "===ANALYSIS END==="
@@ -186,7 +206,15 @@ INSTRUCTIONS:
                 'quality_controls': r'QUALITY_CONTROLS:\s*(.+?)(?=\n\w+:|$)',
                 'rca_tool': r'RCA_TOOL:\s*(.+?)(?=\n\w+:|$)',
                 'expected_interim_action': r'EXPECTED_INTERIM_ACTION:\s*(.+?)(?=\n\w+:|$)',
-                'capa': r'CAPA:\s*(.+?)(?=\n\w+:|$)'
+                'capa': r'CAPA:\s*(.+?)(?=\n\w+:|$)',
+                'deviation_triage': r'DEVIATION_TRIAGE:\s*(.+?)(?=\n\w+:|$)',
+                'product_quality': r'PRODUCT_QUALITY:\s*(\{.*?\}|.+?)(?=\n\w+:|$)',
+                'patient_safety': r'PATIENT_SAFETY:\s*(\{.*?\}|.+?)(?=\n\w+:|$)',
+                'regulatory_impact': r'REGULATORY_IMPACT:\s*(\{.*?\}|.+?)(?=\n\w+:|$)',
+                'validation_impact': r'VALIDATION_IMPACT:\s*(.+?)(?=\n\w+:|$)',
+                'customer_notification': r'CUSTOMER_NOTIFICATION:\s*(.+?)(?=\n\w+:|$)',
+                'review_qta': r'REVIEW_QTA:\s*(.+?)(?=\n\w+:|$)',
+                'criticality': r'CRITICALITY:\s*(.+?)(?=\n\w+:|$)'
             }
             for key, pattern in patterns.items():
                 match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
@@ -194,6 +222,11 @@ INSTRUCTIONS:
                     value = match.group(1).strip()
                     value = re.sub(r'\n\s*', ' ', value)
                     value = re.sub(r'\s+', ' ', value)
+                    if key in ['product_quality', 'patient_safety', 'regulatory_impact']:
+                        try:
+                            value = json.loads(value)
+                        except Exception:
+                            value = None
                     incident_data[key] = value
             return incident_data
         except Exception as e:

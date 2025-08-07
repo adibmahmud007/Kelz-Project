@@ -27,6 +27,7 @@ document_ocr = DocumentOCR()
 from app.services.deviation.incident import incident_router
 from app.services.deviation.file_extract.file_extract_router import router as file_extract_router
 from app.services.deviation.investigation.investigation_router import router as investigation_router
+from app.services.QTA.QTA_revision.QTA_revision_router import router as qta_revision_router
 
 # Register incident routes
 incident_router.register_incident_routes(router)
@@ -34,6 +35,9 @@ incident_router.register_incident_routes(router)
 # Include file extract router under deviation tag
 router.include_router(file_extract_router, prefix="/deviation", tags=["deviation"])
 router.include_router(investigation_router, prefix="/investigation/audio", tags=["deviation"])
+
+# Include QTA revision router
+router.include_router(qta_revision_router, tags=["qta-revision"])
 
 # --- DEFAULT TAG ENDPOINTS ---
 @router.post("/ai-analysis/", tags=["default"])
@@ -329,7 +333,8 @@ def read_root():
             "capa_details": "/capa/details/",
             "capa_review": "/capa/review/",
             "capa_documents": "/capa/documents/",
-            "incident_management": "/incident/"
+            "incident_management": "/incident/",
+            "qta_revision": "/qta-revision/"
         }
     }
 

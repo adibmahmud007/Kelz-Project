@@ -33,6 +33,14 @@ class IncidentResponse(BaseModel):
     incident_description: Optional[str] = Field(None, description="AI-generated incident description")
     headline: Optional[str] = Field(None, description="Succinct headline of incident")
     analysis: Optional[IncidentAnalysis] = Field(None, description="Detailed incident analysis")
+    deviation_triage: Optional[str] = Field(None, description="Deviation triage (Yes/No)")
+    product_quality: Optional[dict] = Field(None, description="Product quality impact (dict with yes_no/level)")
+    patient_safety: Optional[dict] = Field(None, description="Patient safety impact (dict with yes_no/level)")
+    regulatory_impact: Optional[dict] = Field(None, description="Regulatory impact (dict with yes_no/level)")
+    validation_impact: Optional[str] = Field(None, description="Validation impact (Yes/No)")
+    customer_notification: Optional[str] = Field(None, description="Customer notification (Yes/No)")
+    review_qta: Optional[str] = Field(None, description="Review QTA string")
+    criticality: Optional[str] = Field(None, description="Criticality (Minor/Major)")
     
     model_config = ConfigDict(
         json_encoders={

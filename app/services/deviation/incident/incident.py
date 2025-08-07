@@ -9,6 +9,7 @@ import tempfile
 from typing import Optional, Tuple
 from app.services.utils.transcription import VoiceTranscriber
 from app.services.utils.ai_analysis import AIAnalyzer
+from app.services.utils.document_ocr import DocumentOCR
 from app.services.deviation.incident.incident_schema import IncidentSchema, IncidentAnalysis, IncidentResponse, IncidentSummaryResponse
 
 class IncidentManager:
@@ -20,6 +21,7 @@ class IncidentManager:
         """Initialize transcriber and analyzer"""
         self.transcriber = VoiceTranscriber()
         self.analyzer = AIAnalyzer()
+        self.document_ocr = DocumentOCR()
         
     def process_incident_from_audio(self, audio_file_path: str) -> IncidentResponse:
         """
@@ -80,8 +82,11 @@ class IncidentManager:
             # Step 2: Get detailed analysis
             print("🔍 Performing detailed incident analysis...")
             analysis_data = self.analyzer.analyze_incident(transcribed_text)
-            
+            print("DEBUG: analysis_data type:", type(analysis_data))
+            print("DEBUG: analysis_data value:", analysis_data)
+
             if not analysis_data:
+                print("ERROR: analysis_data is None or empty")
                 return IncidentResponse(
                     success=False,
                     message="Failed to analyze incident",
@@ -90,24 +95,42 @@ class IncidentManager:
                     headline=headline,
                     analysis=None
                 )
-            
+            if not isinstance(analysis_data, dict):
+                print("ERROR: analysis_data is not a dict:", analysis_data)
+                return IncidentResponse(
+                    success=False,
+                    message="AI returned invalid analysis data",
+                    transcription=transcribed_text,
+                    incident_description=incident_description,
+                    headline=headline,
+                    analysis=None
+                )
             # Step 3: Create structured analysis object
-            analysis = IncidentAnalysis(
-                title=analysis_data.get('title', 'Unknown Incident'),
-                who=analysis_data.get('who', 'Not specified'),
-                what=analysis_data.get('what', 'Not specified'),
-                where=analysis_data.get('where', 'Not specified'),
-                immediate_action=analysis_data.get('immediate_action', 'Not specified'),
-                quality_concerns=analysis_data.get('quality_concerns', 'Not specified'),
-                quality_controls=analysis_data.get('quality_controls', 'Not specified'),
-                rca_tool=analysis_data.get('rca_tool', 'Not specified'),
-                expected_interim_action=analysis_data.get('expected_interim_action', 'Not specified'),
-                capa=analysis_data.get('capa', 'Not specified')
-            )
-            
+            try:
+                analysis = IncidentAnalysis(
+                    title=analysis_data.get('title', 'Unknown Incident'),
+                    who=analysis_data.get('who', 'Not specified'),
+                    what=analysis_data.get('what', 'Not specified'),
+                    where=analysis_data.get('where', 'Not specified'),
+                    immediate_action=analysis_data.get('immediate_action', 'Not specified'),
+                    quality_concerns=analysis_data.get('quality_concerns', 'Not specified'),
+                    quality_controls=analysis_data.get('quality_controls', 'Not specified'),
+                    rca_tool=analysis_data.get('rca_tool', 'Not specified'),
+                    expected_interim_action=analysis_data.get('expected_interim_action', 'Not specified'),
+                    capa=analysis_data.get('capa', 'Not specified')
+                )
+            except Exception as e:
+                print("ERROR: Failed to create IncidentAnalysis:", e)
+                return IncidentResponse(
+                    success=False,
+                    message=f"Failed to create IncidentAnalysis: {e}",
+                    transcription=transcribed_text,
+                    incident_description=incident_description,
+                    headline=headline,
+                    analysis=None
+                )
             print("✅ Incident analysis completed successfully")
-            
-            return IncidentResponse(
+            result = IncidentResponse(
                 success=True,
                 message="Incident processed successfully",
                 transcription=transcribed_text,
@@ -115,6 +138,14 @@ class IncidentManager:
                 headline=headline,
                 analysis=analysis
             )
+            # Attach new fields from analysis_data to the result object
+            for field in [
+                'deviation_triage', 'product_quality', 'patient_safety', 'regulatory_impact',
+                'validation_impact', 'customer_notification', 'review_qta', 'criticality'
+            ]:
+                setattr(result, field, analysis_data.get(field))
+            print("DEBUG: IncidentResponse result:", result)
+            return result
             
         except Exception as e:
             print(f"❌ Error processing incident from text: {str(e)}")
@@ -392,94 +423,8 @@ Provide ONLY the headline, no additional text.
                 tmp_file.write(file_content)
                 tmp_file_path = tmp_file.name
             try:
-                ext = os.path.splitext(filename)[1].lower()
-                if ext == '.pdf':
-                    try:
-                        from PyPDF2 import PdfReader
-                        reader = PdfReader(tmp_file_path)
-                        texts = []
-                        for i, page in enumerate(reader.pages):
-                            page_text = page.extract_text()
-                            if page_text:
-                                texts.append(page_text)
-                        extracted_text = "\n".join(texts)
-                        print(f"[PDF Extraction] Extracted {len(extracted_text)} characters from PDF '{filename}'")
-                        # If no text, try OCR on images
-                        if not extracted_text.strip():
-                            try:
-                                from pdf2image import convert_from_path
-                                import pytesseract
-                                ocr_texts = []
-                                images = convert_from_path(tmp_file_path)
-                                for i, image in enumerate(images):
-                                    ocr_text = pytesseract.image_to_string(image)
-                                    if ocr_text:
-                                        ocr_texts.append(ocr_text)
-                                extracted_text = "\n".join(ocr_texts)
-                                print(f"[PDF OCR] Extracted {len(extracted_text)} characters from OCR for PDF '{filename}'")
-                                if not extracted_text.strip():
-                                    return IncidentResponse(
-                                        success=False,
-                                        message="No extractable text found in the PDF (neither text-based nor via OCR).",
-                                        transcription=None,
-                                        incident_description=None,
-                                        headline=None,
-                                        analysis=None
-                                    )
-                            except Exception as ocr_e:
-                                return IncidentResponse(
-                                    success=False,
-                                    message=f"Failed to extract text from PDF via OCR: {str(ocr_e)}",
-                                    transcription=None,
-                                    incident_description=None,
-                                    headline=None,
-                                    analysis=None
-                                )
-                    except Exception as e:
-                        return IncidentResponse(
-                            success=False,
-                            message=f"Failed to extract text from PDF: {str(e)}",
-                            transcription=None,
-                            incident_description=None,
-                            headline=None,
-                            analysis=None
-                        )
-                elif ext == '.docx':
-                    try:
-                        import docx
-                        doc = docx.Document(tmp_file_path)
-                        extracted_text = "\n".join([para.text for para in doc.paragraphs])
-                    except Exception as e:
-                        return IncidentResponse(
-                            success=False,
-                            message=f"Failed to extract text from DOCX: {str(e)}",
-                            transcription=None,
-                            incident_description=None,
-                            headline=None,
-                            analysis=None
-                        )
-                elif ext == '.txt':
-                    try:
-                        with open(tmp_file_path, 'r', encoding='utf-8') as f:
-                            extracted_text = f.read()
-                    except Exception as e:
-                        return IncidentResponse(
-                            success=False,
-                            message=f"Failed to read TXT file: {str(e)}",
-                            transcription=None,
-                            incident_description=None,
-                            headline=None,
-                            analysis=None
-                        )
-                else:
-                    return IncidentResponse(
-                        success=False,
-                        message=f"Unsupported document file type: {ext}",
-                        transcription=None,
-                        incident_description=None,
-                        headline=None,
-                        analysis=None
-                    )
+                # Use DocumentOCR for all document extraction
+                extracted_text = self.document_ocr.process_file(tmp_file_path)
                 if not extracted_text or not extracted_text.strip():
                     return IncidentResponse(
                         success=False,

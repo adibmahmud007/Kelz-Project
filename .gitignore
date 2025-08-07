@@ -71,3 +71,6 @@ Desktop.ini
 
 # Environment variables
 .env
+
+# Google Cloud credentials
+qsync-genesys-9281cb30e0a1.json

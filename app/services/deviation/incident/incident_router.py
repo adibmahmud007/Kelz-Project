@@ -42,12 +42,17 @@ def register_incident_routes(router):
             filenames = []
 
             # Process audio if provided and not empty
-            if audio and audio.filename:
+            print("DEBUG: audio=", audio)
+            print("DEBUG: file=", file)
+            if audio and hasattr(audio, 'filename') and audio.filename:
                 audio_content = await audio.read()
+                print("DEBUG: audio.filename=", audio.filename)
+                print("DEBUG: len(audio_content)=", len(audio_content))
                 if not audio.filename.strip() or not audio_content:
                     audio = None  # Treat as not provided
                 else:
                     audio_ext = os.path.splitext(audio.filename)[1].lower()
+                    print("DEBUG: audio_ext=", audio_ext)
                     if audio_ext not in valid_audio_extensions:
                         raise HTTPException(status_code=400, detail=f"Unsupported audio file format: {audio_ext}")
                     if len(audio_content) > 25 * 1024 * 1024:
@@ -59,12 +64,15 @@ def register_incident_routes(router):
 
 
             # Process document if provided and not empty
-            if file and file.filename:
+            if file and hasattr(file, 'filename') and file.filename:
                 file_content = await file.read()
+                print("DEBUG: file.filename=", file.filename)
+                print("DEBUG: len(file_content)=", len(file_content))
                 if not file.filename.strip() or not file_content:
                     file = None  # Treat as not provided
                 else:
                     file_ext = os.path.splitext(file.filename)[1].lower()
+                    print("DEBUG: file_ext=", file_ext)
                     if file_ext not in valid_doc_extensions:
                         raise HTTPException(status_code=400, detail=f"Unsupported document file format: {file_ext}")
                     if len(file_content) > 25 * 1024 * 1024:
@@ -98,6 +106,14 @@ def register_incident_routes(router):
                         "expected_interim_action": combined_result.analysis.expected_interim_action if combined_result.analysis else "",
                         "capa": combined_result.analysis.capa if combined_result.analysis else ""
                     },
+                    "deviation_triage": getattr(combined_result, "deviation_triage", None),
+                    "product_quality": getattr(combined_result, "product_quality", None),
+                    "patient_safety": getattr(combined_result, "patient_safety", None),
+                    "regulatory_impact": getattr(combined_result, "regulatory_impact", None),
+                    "validation_impact": getattr(combined_result, "validation_impact", None),
+                    "customer_notification": getattr(combined_result, "customer_notification", None),
+                    "review_qta": getattr(combined_result, "review_qta", None),
+                    "criticality": getattr(combined_result, "criticality", None),
                     "message": "Deviation incident analysis completed" if combined_result.success else combined_result.message
                 }
             # If only one file is present, analyze as before
@@ -120,6 +136,14 @@ def register_incident_routes(router):
                         "expected_interim_action": audio_result.analysis.expected_interim_action if audio_result.analysis else "",
                         "capa": audio_result.analysis.capa if audio_result.analysis else ""
                     },
+                    "deviation_triage": getattr(audio_result, "deviation_triage", None),
+                    "product_quality": getattr(audio_result, "product_quality", None),
+                    "patient_safety": getattr(audio_result, "patient_safety", None),
+                    "regulatory_impact": getattr(audio_result, "regulatory_impact", None),
+                    "validation_impact": getattr(audio_result, "validation_impact", None),
+                    "customer_notification": getattr(audio_result, "customer_notification", None),
+                    "review_qta": getattr(audio_result, "review_qta", None),
+                    "criticality": getattr(audio_result, "criticality", None),
                     "message": "Deviation incident analysis completed" if audio_result.success else audio_result.message
                 }
             elif file_text:
@@ -141,6 +165,14 @@ def register_incident_routes(router):
                         "expected_interim_action": file_result.analysis.expected_interim_action if file_result.analysis else "",
                         "capa": file_result.analysis.capa if file_result.analysis else ""
                     },
+                    "deviation_triage": getattr(file_result, "deviation_triage", None),
+                    "product_quality": getattr(file_result, "product_quality", None),
+                    "patient_safety": getattr(file_result, "patient_safety", None),
+                    "regulatory_impact": getattr(file_result, "regulatory_impact", None),
+                    "validation_impact": getattr(file_result, "validation_impact", None),
+                    "customer_notification": getattr(file_result, "customer_notification", None),
+                    "review_qta": getattr(file_result, "review_qta", None),
+                    "criticality": getattr(file_result, "criticality", None),
                     "message": "Deviation incident analysis completed" if file_result.success else file_result.message
                 }
             else:
